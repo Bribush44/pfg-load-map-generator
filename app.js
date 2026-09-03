@@ -63,14 +63,53 @@ function mapPage(job){
   return`<section class="print-sheet"><div class="print-header"><img src="assets/pfg-logo-white.png"><h1>TRAILER LOAD MAP</h1><div class="meta">OPPK: ${escapeHtml(job.oppk)}<br>DATE: ${escapeHtml(job.date)}</div></div><div class="print-ids"><div class="id-box"><small>DOOR</small><strong>${escapeHtml(job.door)}</strong></div><div class="id-box"><small>ROUTE</small><strong>${escapeHtml(job.route)}</strong></div><div class="id-box"><small>TRAILER</small><strong>${job.trailer} FT</strong></div><div class="id-box"><small>LOADER SIGN-OFF / START TIME</small>________________ / ________</div></div><div class="orientation">NOSE / FRONT OF TRAILER ↓</div><div class="trailer-shell"><div class="side-labels"><span>LEFT SIDE — ODD POSITIONS</span><span>RIGHT SIDE — EVEN POSITIONS</span></div><div class="slot-grid">${slots.slice(0,4).join('')}<div class="bulkhead">INSULATED BULKHEAD / BUN — FREEZER ABOVE | COOLER + DRY BELOW</div>${slots.slice(4).join('')}</div>${handHtml}<div class="rear">REAR DOORS / LOAD FROM THIS END</div></div><div class="totals"><b>COMPARTMENT TOTALS</b><table><tr><th>AREA</th><th>PALLETS</th><th>WEIGHT</th><th>QTY</th></tr>${Object.entries(tot).map(([k,v])=>`<tr><td>${k.toUpperCase()}</td><td>${v.p}</td><td>${v.w.toLocaleString()}</td><td>${v.q}</td></tr>`).join('')}</table></div><div class="verification"><span><span class="check"></span> PALLETS ${job.pallets.length}</span><span><span class="check"></span> HAND STACK ${hand.length}</span><span><span class="check"></span> STRAPS ${straps}</span><span><span class="check"></span> LOAD LOCKS ${locks}</span></div></section>`;
 }
 function labelPage(job){const labels=[...job.pallets,...Array(Math.max(0,28-job.pallets.length)).fill(null)].slice(0,28);return`<section class="print-sheet"><div class="print-header"><img src="assets/pfg-logo-white.png"><h1>PALLET LABEL RECORD</h1><div class="meta">ROUTE ${escapeHtml(job.route)}<br>${escapeHtml(job.date)}</div></div><p style="font-size:8pt;color:#e31b23;font-weight:800">PRINT AT ACTUAL SIZE (100%) — EACH SPACE IS 2 × 1 INCH</p><div class="label-grid">${labels.map((p,i)=>`<div class="label-space"><strong>${p?`${p.code} | SOURCE POSITION ${p.pos}`:`EXTRA LABEL SPACE ${i+1}`}</strong><span>APPLY 2 × 1 LABEL HERE</span></div>`).join('')}</div><div class="label-footer"><span class="check"></span> ALL ${job.pallets.length} LABELS ATTACHED &nbsp;&nbsp; Loader: __________________ &nbsp;&nbsp; Time: __________</div></section>`}
-$('#printButton').addEventListener('click',()=>{
+let preparedPdf=null;
+async function preparePreview(){
   const jobs=state.jobs.filter(j=>j.status!=='reading');
   if(!jobs.length){alert('Add and review at least one load map first.');return;}
+  $('#previewScreen').classList.remove('hidden');
+  $('#previewPages').innerHTML='<div class="preview-loading">Preparing printable pages…</div>';
+  $('#previewStatus').textContent='Preparing…';
+  $('#sharePdf').disabled=true;$('#sharePdf').textContent='Preparing PDF…';
   $('#printArea').innerHTML=jobs.map(j=>mapPage(j)+labelPage(j)).join('');
-  // Force print layout now and keep window.print() inside the original tap.
-  // iPhone Safari blocks print dialogs opened later by setTimeout.
-  void $('#printArea').offsetHeight;
-  window.print();
+  preparedPdf=null;
+  try{
+    await document.fonts?.ready;
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    const pages=[...document.querySelectorAll('#printArea .print-sheet')];
+    const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'pt',format:'letter',compress:true});
+    $('#previewPages').innerHTML='';
+    for(let i=0;i<pages.length;i++){
+      $('#previewStatus').textContent=`Page ${i+1} of ${pages.length}`;
+      const canvas=await html2canvas(pages[i],{scale:1.25,useCORS:true,backgroundColor:'#ffffff',logging:false});
+      const image=canvas.toDataURL('image/jpeg',0.88);
+      const preview=document.createElement('img');preview.src=image;preview.alt=`PDF page ${i+1}`;$('#previewPages').appendChild(preview);
+      if(i)pdf.addPage('letter','portrait');
+      pdf.addImage(image,'JPEG',0,0,612,792,undefined,'FAST');
+      canvas.width=1;canvas.height=1;
+    }
+    preparedPdf=pdf.output('blob');
+    $('#previewStatus').textContent=`${pages.length} pages ready`;
+    $('#sharePdf').disabled=false;$('#sharePdf').textContent='Share PDF';
+  }catch(error){
+    console.error(error);$('#previewStatus').textContent='Preview failed';
+    $('#previewPages').innerHTML='<div class="preview-loading">The PDF preview could not be created. Check your internet connection and try again.</div>';
+    $('#sharePdf').textContent='Share unavailable';
+  }
+}
+$('#printButton').addEventListener('click',preparePreview);
+$('#closePreview').addEventListener('click',()=>$('#previewScreen').classList.add('hidden'));
+$('#printPdf').addEventListener('click',()=>{void $('#printArea').offsetHeight;window.print();});
+$('#sharePdf').addEventListener('click',async()=>{
+  if(!preparedPdf)return;
+  const jobs=state.jobs.filter(j=>j.status!=='reading');
+  const name=jobs.length===1?`Route_${jobs[0].route}_Load_Map.pdf`:`PFG_Load_Maps_${jobs.length}_Routes.pdf`;
+  const file=new File([preparedPdf],name,{type:'application/pdf'});
+  if(navigator.share&&navigator.canShare?.({files:[file]})){
+    try{await navigator.share({files:[file],title:'PFG Load Maps'});}catch(error){if(error.name!=='AbortError')console.error(error);}
+  }else{
+    const link=document.createElement('a');link.href=URL.createObjectURL(preparedPdf);link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+  }
 });
 $('#installButton').addEventListener('click',()=>$('#installHelp').showModal());$('.dialog-close').addEventListener('click',()=>$('#installHelp').close());
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
