@@ -3,22 +3,20 @@ const state={jobs:[]};
 const $=s=>document.querySelector(s);
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const trailerSize=()=>Number(document.querySelector('input[name="trailer"]:checked').value);
-$('#accessCode').value=localStorage.getItem('pfgAccessCode')||'';
-$('#accessCode').addEventListener('change',e=>localStorage.setItem('pfgAccessCode',e.target.value.trim()));
-
 async function imageData(file){
-  const bitmap=await createImageBitmap(file),max=2000,scale=Math.min(1,max/Math.max(bitmap.width,bitmap.height));
-  const canvas=document.createElement('canvas');canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);
-  canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close?.();
-  return canvas.toDataURL('image/jpeg',0.88);
+  const url=URL.createObjectURL(file),image=new Image();
+  try{
+    await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('This iPhone photo could not be opened. Try taking the picture again.'));image.src=url;});
+    const max=2000,scale=Math.min(1,max/Math.max(image.naturalWidth,image.naturalHeight));
+    const canvas=document.createElement('canvas');canvas.width=Math.round(image.naturalWidth*scale);canvas.height=Math.round(image.naturalHeight*scale);
+    const context=canvas.getContext('2d');context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);
+    const data=canvas.toDataURL('image/jpeg',0.88);if(data==='data:,')throw new Error('The photo could not be prepared. Try taking it again.');return data;
+  }finally{URL.revokeObjectURL(url);}
 }
 
 async function analyzeWithAI(file){
-  const code=$('#accessCode').value.trim();
-  if(!code)throw new Error('Enter your private app code first.');
-  localStorage.setItem('pfgAccessCode',code);
-  const response=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json','X-App-Code':code},body:JSON.stringify({image:await imageData(file),trailer:trailerSize()})});
-  const result=await response.json();if(!response.ok)throw new Error(result.error||'AI analysis failed');return result;
+  const response=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:await imageData(file),trailer:trailerSize()})});
+  const result=await response.json().catch(()=>({error:`Analysis service returned ${response.status}`}));if(!response.ok)throw new Error(result.error||'AI analysis failed');return result;
 }
 
 function parseText(text,file,index){
@@ -34,6 +32,7 @@ function parseText(text,file,index){
 }
 
 async function addFiles(files){
+  if(!files.length)return;
   for(const file of files){
     const temp={id:crypto.randomUUID(),fileName:file.name,status:'reading',progress:0,preview:URL.createObjectURL(file)};
     state.jobs.push(temp);renderQueue();
