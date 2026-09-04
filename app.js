@@ -3,6 +3,23 @@ const state={jobs:[]};
 const $=s=>document.querySelector(s);
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const trailerSize=()=>Number(document.querySelector('input[name="trailer"]:checked').value);
+$('#accessCode').value=localStorage.getItem('pfgAccessCode')||'';
+$('#accessCode').addEventListener('change',e=>localStorage.setItem('pfgAccessCode',e.target.value.trim()));
+
+async function imageData(file){
+  const bitmap=await createImageBitmap(file),max=2000,scale=Math.min(1,max/Math.max(bitmap.width,bitmap.height));
+  const canvas=document.createElement('canvas');canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);
+  canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close?.();
+  return canvas.toDataURL('image/jpeg',0.88);
+}
+
+async function analyzeWithAI(file){
+  const code=$('#accessCode').value.trim();
+  if(!code)throw new Error('Enter your private app code first.');
+  localStorage.setItem('pfgAccessCode',code);
+  const response=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json','X-App-Code':code},body:JSON.stringify({image:await imageData(file),trailer:trailerSize()})});
+  const result=await response.json();if(!response.ok)throw new Error(result.error||'AI analysis failed');return result;
+}
 
 function parseText(text,file,index){
   const clean=text.replace(/[|]/g,' ').replace(/\r/g,'');
@@ -21,15 +38,15 @@ async function addFiles(files){
     const temp={id:crypto.randomUUID(),fileName:file.name,status:'reading',progress:0,preview:URL.createObjectURL(file)};
     state.jobs.push(temp);renderQueue();
     try{
-      const result=await Tesseract.recognize(file,'eng',{logger:m=>{if(m.status==='recognizing text'){temp.progress=Math.round(m.progress*100);renderQueue();}}});
-      Object.assign(temp,parseText(result.data.text,file,state.jobs.indexOf(temp)),{preview:temp.preview});
-    }catch(e){Object.assign(temp,parseText('',file,state.jobs.indexOf(temp)),{preview:temp.preview,status:'review',error:'Automatic reading failed. Enter the values below.'});}
+      const result=await analyzeWithAI(file);
+      Object.assign(temp,{...result,id:temp.id,fileName:file.name,trailer:trailerSize(),preview:temp.preview,status:'ready'});
+    }catch(e){Object.assign(temp,parseText('',file,state.jobs.indexOf(temp)),{id:temp.id,preview:temp.preview,status:'review',error:e.message||'Automatic reading failed. Enter the values below.',barcodes:{dry:'',cooler:'',frozen:''}});}
     renderQueue();renderReviews();
   }
 }
 
 function renderQueue(){
-  $('#queue').innerHTML=state.jobs.map(j=>`<div class="queue-item"><img src="${j.preview||''}" alt=""><div><strong>${escapeHtml(j.fileName)}</strong><small>${j.status==='reading'?`Reading sheet… ${j.progress||0}%`:`Ready to review · ${j.pallets?.length||0} pallets found`}</small>${j.status==='reading'?`<div class="progress"><i style="width:${j.progress||0}%"></i></div>`:''}</div></div>`).join('');
+  $('#queue').innerHTML=state.jobs.map(j=>`<div class="queue-item"><img src="${j.preview||''}" alt=""><div><strong>${escapeHtml(j.fileName)}</strong><small>${j.status==='reading'?'OpenAI is reading the sheet…':`Ready to review · ${j.pallets?.length||0} pallets found`}</small>${j.error?`<small class="tag">${escapeHtml(j.error)}</small>`:''}${j.status==='reading'?'<div class="progress"><i style="width:65%"></i></div>':''}</div></div>`).join('');
 }
 
 function palletLines(job){return job.pallets.map(p=>`${p.pos}, ${p.code}, ${p.weight}, ${p.qty}, ${p.stops}`).join('\n');}
@@ -42,11 +59,13 @@ function renderReviews(){
   $('#reviews').innerHTML=ready.map((j,i)=>`<details class="route-review" open><summary class="route-summary"><span>${escapeHtml(j.route)}</span><span>${j.pallets.length} pallets</span></summary><div class="route-fields">
     <label>Route #<input data-id="${j.id}" data-key="route" value="${escapeHtml(j.route)}"></label><label>Door<input data-id="${j.id}" data-key="door" value="${escapeHtml(j.door)}"></label>
     <label>OPPK<input data-id="${j.id}" data-key="oppk" value="${escapeHtml(j.oppk)}"></label><label>Date<input data-id="${j.id}" data-key="date" value="${escapeHtml(j.date)}"></label>
+    <label>Dry barcode<input data-id="${j.id}" data-key="barcode-dry" value="${escapeHtml(j.barcodes?.dry||'')}"></label><label>Cooler barcode<input data-id="${j.id}" data-key="barcode-cooler" value="${escapeHtml(j.barcodes?.cooler||'')}"></label>
+    <label>Frozen barcode<input data-id="${j.id}" data-key="barcode-frozen" value="${escapeHtml(j.barcodes?.frozen||'')}"></label><span></span>
     <label class="full">Pallets — one per line: position, code, weight, quantity, stops<textarea data-id="${j.id}" data-key="pallets">${escapeHtml(palletLines(j))}</textarea></label>
   </div></details>`).join('');
 }
 
-document.addEventListener('input',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id)return;const job=state.jobs.find(j=>j.id===id);if(key==='pallets')job.pallets=parseLines(e.target.value);else job[key]=e.target.value;});
+document.addEventListener('input',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id)return;const job=state.jobs.find(j=>j.id===id);if(key==='pallets')job.pallets=parseLines(e.target.value);else if(key.startsWith('barcode-')){job.barcodes=job.barcodes||{};job.barcodes[key.slice(8)]=e.target.value.trim();}else job[key]=e.target.value;});
 $('#cameraInput').addEventListener('change',e=>addFiles([...e.target.files]));$('#batchInput').addEventListener('change',e=>addFiles([...e.target.files]));
 $('#clearButton').addEventListener('click',()=>{state.jobs.forEach(j=>j.preview&&URL.revokeObjectURL(j.preview));state.jobs=[];renderQueue();renderReviews();$('#printArea').innerHTML='';});
 
@@ -54,6 +73,7 @@ function zone(code){return code[0]==='F'?'freezer':code[0]==='R'?'cooler':'dry'}
 function summarize(job){const out={freezer:{p:0,w:0,q:0},cooler:{p:0,w:0,q:0},dry:{p:0,w:0,q:0}};job.pallets.forEach(p=>{const z=out[zone(p.code)];z.p++;z.w+=p.weight;z.q+=p.qty});return out;}
 function restraints(p){return p.weight>1200?(p.code[0]==='F'?'LOAD LOCK':'STRAP'):'';}
 function isPinwheel(p,job){return job.trailer===28&&/^R0[1-4]$/.test(p.code)}
+function barcodeBox(label,value){return`<div class="barcode-box">${label}${value?`<svg class="barcode" data-value="${escapeHtml(value)}"></svg>`:'<span class="barcode-missing">REVIEW VALUE</span>'}</div>`}
 
 function mapPage(job){
   const cap=CAPACITY[job.trailer].pinwheel,sorted=[...job.pallets].sort((a,b)=>a.pos-b.pos),main=sorted.slice(0,cap),hand=sorted.slice(cap),positions=Array.from({length:cap},(_,i)=>i+1),tot=summarize(job);
@@ -62,6 +82,12 @@ function mapPage(job){
   const straps=job.pallets.filter(p=>restraints(p)==='STRAP').length,locks=job.pallets.filter(p=>restraints(p)==='LOAD LOCK').length;
   return`<section class="print-sheet"><div class="print-header"><img src="assets/pfg-logo-white.png"><h1>TRAILER LOAD MAP</h1><div class="meta">OPPK: ${escapeHtml(job.oppk)}<br>DATE: ${escapeHtml(job.date)}</div></div><div class="print-ids"><div class="id-box"><small>DOOR</small><strong>${escapeHtml(job.door)}</strong></div><div class="id-box"><small>ROUTE</small><strong>${escapeHtml(job.route)}</strong></div><div class="id-box"><small>TRAILER</small><strong>${job.trailer} FT</strong></div><div class="id-box"><small>LOADER SIGN-OFF / START TIME</small>________________ / ________</div></div><div class="orientation">NOSE / FRONT OF TRAILER ↓</div><div class="trailer-shell"><div class="side-labels"><span>LEFT SIDE — ODD POSITIONS</span><span>RIGHT SIDE — EVEN POSITIONS</span></div><div class="slot-grid">${slots.slice(0,4).join('')}<div class="bulkhead">INSULATED BULKHEAD / BUN — FREEZER ABOVE | COOLER + DRY BELOW</div>${slots.slice(4).join('')}</div>${handHtml}<div class="rear">REAR DOORS / LOAD FROM THIS END</div></div><div class="totals"><b>COMPARTMENT TOTALS</b><table><tr><th>AREA</th><th>PALLETS</th><th>WEIGHT</th><th>QTY</th></tr>${Object.entries(tot).map(([k,v])=>`<tr><td>${k.toUpperCase()}</td><td>${v.p}</td><td>${v.w.toLocaleString()}</td><td>${v.q}</td></tr>`).join('')}</table></div><div class="verification"><span><span class="check"></span> PALLETS ${job.pallets.length}</span><span><span class="check"></span> HAND STACK ${hand.length}</span><span><span class="check"></span> STRAPS ${straps}</span><span><span class="check"></span> LOAD LOCKS ${locks}</span></div></section>`;
 }
+const mapPageWithoutBarcodes=mapPage;
+mapPage=job=>{
+  const b=job.barcodes||{};
+  const row=`<div class="barcode-row">${barcodeBox('DRY LOADING ASSIGNMENT',b.dry)}${barcodeBox('COOLER LOADING ASSIGNMENT',b.cooler)}${barcodeBox('FROZEN LOADING ASSIGNMENT',b.frozen)}</div>`;
+  return mapPageWithoutBarcodes(job).replace('<div class="verification">',`${row}<div class="verification">`);
+};
 function labelPage(job){const labels=[...job.pallets,...Array(Math.max(0,28-job.pallets.length)).fill(null)].slice(0,28);return`<section class="print-sheet"><div class="print-header"><img src="assets/pfg-logo-white.png"><h1>PALLET LABEL RECORD</h1><div class="meta">ROUTE ${escapeHtml(job.route)}<br>${escapeHtml(job.date)}</div></div><p style="font-size:8pt;color:#e31b23;font-weight:800">PRINT AT ACTUAL SIZE (100%) — EACH SPACE IS 2 × 1 INCH</p><div class="label-grid">${labels.map((p,i)=>`<div class="label-space"><strong>${p?`${p.code} | SOURCE POSITION ${p.pos}`:`EXTRA LABEL SPACE ${i+1}`}</strong><span>APPLY 2 × 1 LABEL HERE</span></div>`).join('')}</div><div class="label-footer"><span class="check"></span> ALL ${job.pallets.length} LABELS ATTACHED &nbsp;&nbsp; Loader: __________________ &nbsp;&nbsp; Time: __________</div></section>`}
 let preparedPdf=null;
 async function preparePreview(){
@@ -76,6 +102,7 @@ async function preparePreview(){
   try{
     await document.fonts?.ready;
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    document.querySelectorAll('#printArea .barcode').forEach(svg=>JsBarcode(svg,svg.dataset.value,{format:'CODE128',width:1.1,height:22,margin:0,fontSize:7,displayValue:true}));
     const pages=[...document.querySelectorAll('#printArea .print-sheet')];
     const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'pt',format:'letter',compress:true});
     $('#previewPages').innerHTML='';
