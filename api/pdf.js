@@ -30,16 +30,21 @@ async function loadMapPage(doc,job){
   doc.font('Helvetica-Bold').fontSize(7).fillColor('#111').text('NOSE / FRONT OF TRAILER',20,112,{width:572,align:'center'});
   doc.fontSize(6).text('LEFT SIDE - ODD POSITIONS',26,125,{width:272,align:'center'}).text('RIGHT SIDE - EVEN POSITIONS',314,125,{width:272,align:'center'});
   const cap=CAPACITY[job.trailer]||13,layout=cap+(cap%2),rows=Math.ceil(layout/2),rowH=Math.min(34,300/rows),top=138,w=274,gap=14;
-  const pallets=[...(job.pallets||[])].sort((a,b)=>a.pos-b.pos),main=pallets.filter(p=>p.pos<=cap),hand=pallets.filter(p=>p.pos>cap);
+  const pallets=[...(job.pallets||[])].sort((a,b)=>a.pos-b.pos);let main,hand;
+  if(Number(job.trailer)===53){
+    const onboard=pallets.slice(0,cap),freezer=onboard.filter(p=>p.code?.[0]==='F'),combined=onboard.filter(p=>p.code?.[0]!=='F'),freezerBoundary=Math.ceil((freezer.length+1)/2)*2;
+    main=[...freezer.map((p,i)=>({...p,_slot:i+1,_source:p.pos})),...combined.map((p,i)=>({...p,_slot:freezerBoundary+i+1,_source:p.pos}))];hand=pallets.slice(cap);
+  }else{main=pallets.filter(p=>p.pos<=cap).map(p=>({...p,_slot:p.pos,_source:p.pos}));hand=pallets.filter(p=>p.pos>cap);}
+  const freezerEnd=Math.max(0,...main.filter(p=>p.code?.[0]==='F').map(p=>p._slot)),bulkRows=Math.ceil(freezerEnd/2);
   for(let row=0;row<rows;row++)for(let side=0;side<2;side++){
-    const pos=row*2+side+1,x=22+side*(w+gap),y=top+row*rowH+(row>=2?14:0),p=main.find(v=>v.pos===pos),partial=pos>cap,z=p?zone(p.code):'special';
+    const pos=row*2+side+1,x=22+side*(w+gap),y=top+row*rowH+(row>=bulkRows?14:0),p=main.find(v=>v._slot===pos),partial=pos>cap,z=p?zone(p.code):'special';
     doc.roundedRect(x,y,w,rowH-3,4).fillAndStroke(colors[z],'#555');doc.fillColor('#111').font('Helvetica-Bold').fontSize(8).text(String(pos),x+6,y+6,{width:18});
     if(partial){doc.fontSize(7).text('HAND STACK AREA - PARTIAL SPACE',x+28,y+8,{width:w-34});continue;}
-    if(!p){doc.fontSize(7).text('DOOR SPACE / FREEZER PIR',x+28,y+8,{width:w-34});continue;}
-    doc.fontSize(11).text(safe(p.code),x+28,y+3,{width:45});doc.font('Helvetica').fontSize(6).text(`${Number(p.weight).toLocaleString()} lb | Qty ${p.qty} | Stops ${safe(p.stops)}`,x+75,y+5,{width:125});
-    const flags=[job.trailer===28&&/^R0[1-4]$/.test(p.code)?'P - ROTATE':'',restraint(p)].filter(Boolean).join(' / ');doc.font('Helvetica-Bold').fontSize(5).fillColor('#c00').text(flags,x+198,y+4,{width:70,align:'right'});check(doc,x+202,y+15,'LOAD');
+    if(!p){const blank=Number(job.trailer)===53&&pos>24?'AVAILABLE PINWHEEL SPACE':'DOOR SPACE / FREEZER PIR';doc.fontSize(7).text(blank,x+28,y+8,{width:w-34});continue;}
+    doc.fontSize(11).text(safe(p.code),x+28,y+3,{width:45});doc.font('Helvetica').fontSize(6).text(`${Number(p.weight).toLocaleString()} lb | Qty ${p.qty} | Stops ${safe(p.stops)}${p._source!==pos?` | Src ${p._source}`:''}`,x+75,y+5,{width:125});
+    const flags=[p.code?.[0]!=='F'&&pos%2===1?'P - ROTATE':'',restraint(p)].filter(Boolean).join(' / ');doc.font('Helvetica-Bold').fontSize(5).fillColor('#c00').text(flags,x+198,y+3,{width:70,align:'right'});check(doc,x+202,y+rowH-14,'LOAD');
   }
-  const bulkY=top+2*rowH;doc.rect(22,bulkY,562,11).fill('#111');doc.font('Helvetica-Bold').fontSize(5).fillColor('#fff').text('INSULATED BULKHEAD / BUN - FREEZER ABOVE | COOLER + DRY BELOW',24,bulkY+3,{width:558,align:'center'});
+  const bulkY=top+bulkRows*rowH;doc.rect(22,bulkY,562,11).fill('#111');doc.font('Helvetica-Bold').fontSize(5).fillColor('#fff').text('INSULATED BULKHEAD / BUN - FREEZER ABOVE | COOLER + DRY BELOW',24,bulkY+3,{width:558,align:'center'});
   let y=top+rows*rowH+18;
   if(hand.length){doc.roundedRect(22,y,562,42,4).fillAndStroke('#fff6f6','#c00');doc.font('Helvetica-Bold').fontSize(7).fillColor('#c00').text('HAND STACK ON BACK - OVER CAPACITY',28,y+4);doc.font('Helvetica').fontSize(6).fillColor('#111').text(hand.map(p=>`${safe(p.code)} ${p.weight}lb Qty ${p.qty}${p.weight>200?' REVIEW':''}`).join('   |   '),28,y+15,{width:550,height:22});y+=48;}
   const totals={freezer:{p:0,w:0,q:0},cooler:{p:0,w:0,q:0},dry:{p:0,w:0,q:0}};pallets.forEach(p=>{const z=totals[zone(p.code)];z.p++;z.w+=Number(p.weight)||0;z.q+=Number(p.qty)||0;});
