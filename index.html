@@ -14,6 +14,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -27,6 +28,7 @@
       <div class="step">1</div>
       <div class="card-body">
         <h2>Choose the trailer</h2>
+        <label class="access-field">Private app code<input id="accessCode" type="password" autocomplete="current-password" placeholder="Enter once on this phone"><small>Kept only on this iPhone.</small></label>
         <div class="size-grid" role="radiogroup" aria-label="Trailer size">
           <label><input type="radio" name="trailer" value="28" checked><span>28 ft<small>12 / 13 pinwheeled</small></span></label>
           <label><input type="radio" name="trailer" value="36"><span>36 ft<small>16 / 17 pinwheeled</small></span></label>
@@ -40,7 +42,7 @@
       <div class="step">2</div>
       <div class="card-body">
         <h2>Photograph the original maps</h2>
-        <p class="hint">Lay each sheet flat, fill the frame, and avoid shadows. You can take one photo or select a batch.</p>
+        <p class="hint">Lay each sheet flat, fill the frame, and avoid shadows. OpenAI reads the sheet; you confirm the results.</p>
         <div class="capture-actions">
           <label class="primary-button camera-button">Take picture<input id="cameraInput" type="file" accept="image/*" capture="environment" hidden></label>
           <label class="secondary-button">Choose photos<input id="batchInput" type="file" accept="image/*" multiple hidden></label>
