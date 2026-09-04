@@ -41,7 +41,7 @@ async function loadMapPage(doc,job){
     const pos=row*2+side+1,x=22+side*(w+gap),y=top+row*rowH+(row>=bulkRows?14:0),p=main.find(v=>v._slot===pos),partial=pos>cap,z=p?zone(p.code):'special';
     doc.roundedRect(x,y,w,rowH-3,4).fillAndStroke(colors[z],'#555');doc.fillColor('#111').font('Helvetica-Bold').fontSize(8).text(String(pos),x+6,y+6,{width:18});
     if(partial){doc.fontSize(7).text('HAND STACK AREA - PARTIAL SPACE',x+28,y+8,{width:w-34});continue;}
-    if(!p){const blank=Number(job.trailer)===53&&pos>24?'AVAILABLE PINWHEEL SPACE':'DOOR SPACE / FREEZER PIR';doc.fontSize(7).text(blank,x+28,y+8,{width:w-34});continue;}
+    if(!p){const blank=Number(job.trailer)===53&&pos>24?'AVAILABLE PINWHEEL SPACE':pos<=freezerEnd?'DOOR SPACE / FREEZER PIR':'DOOR SPACE';doc.fontSize(7).text(blank,x+28,y+8,{width:w-34});continue;}
     doc.fontSize(11).text(safe(p.code),x+28,y+3,{width:45});doc.font('Helvetica').fontSize(6).text(`${Number(p.weight).toLocaleString()} lb | Qty ${p.qty} | Stops ${safe(p.stops)}${p._source!==pos?` | Src ${p._source}`:''}`,x+75,y+5,{width:125});
     const flags=[p.code?.[0]!=='F'&&pos%2===1?'P - ROTATE':'',restraint(p)].filter(Boolean).join(' / ');doc.font('Helvetica-Bold').fontSize(5).fillColor('#c00').text(flags,x+198,y+3,{width:70,align:'right'});check(doc,x+202,y+rowH-14,'LOAD');
   }
