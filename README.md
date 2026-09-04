@@ -1,12 +1,14 @@
 # PFG Load Map Generator
 
-Static, phone-first GitHub Pages app for converting photographed pallet plans into printable two-page trailer load maps.
+Phone-first application for converting photographed Performance Food Group pallet plans into printable two-page trailer load maps.
 
-## Publish with GitHub Pages
+## Production hosting
 
-1. Create a repository named `pfg-load-map-generator`.
-2. Upload all files in this folder to the repository root.
-3. In **Settings → Pages**, select **Deploy from a branch**, `main`, `/ (root)`.
-4. Open the published address in iPhone Safari and choose **Share → Add to Home Screen**.
+The application is hosted on Vercel so photographed sheets can be analyzed through a protected OpenAI API endpoint. The source remains in GitHub and each push to `main` automatically deploys the latest version.
 
-The app stores no route or photo data. OCR runs in the browser and print output is created locally.
+Required protected Vercel environment variables:
+
+- `OPENAI_API_KEY`
+- `APP_ACCESS_CODE`
+
+The API key remains server-side. Photos are analyzed for the current request and are not stored by this application. Print output is generated locally on the user's device.
