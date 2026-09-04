@@ -104,39 +104,27 @@ async function preparePreview(){
   $('#previewScreen').classList.remove('hidden');
   $('#previewPages').innerHTML='<div class="preview-loading">Preparing printable pages…</div>';
   $('#previewStatus').textContent='Preparing…';
-  $('#sharePdf').disabled=true;$('#sharePdf').textContent='Preparing PDF…';
+  $('#sharePdf').disabled=true;$('#sharePdf').textContent='Preparing preview…';
   $('#printArea').innerHTML=jobs.map(j=>mapPage(j)+labelPage(j)).join('');
   preparedPdf=null;
   try{
     const pages=[...document.querySelectorAll('#printArea .print-sheet')];
     showPagePreview(pages);
     $('#previewStatus').textContent=`${pages.length} pages ready`;
-    $('#sharePdf').textContent='Preparing share file…';
+    $('#sharePdf').disabled=false;$('#sharePdf').textContent='Print / Save PDF';
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     if(window.JsBarcode){document.querySelectorAll('#printArea .barcode').forEach(svg=>window.JsBarcode(svg,svg.dataset.value,{format:'CODE128',width:1.1,height:22,margin:0,fontSize:7,displayValue:true}));showPagePreview(pages);}
-    if(!window.html2canvas||!window.jspdf)throw new Error('PDF tools did not load');
-    const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'pt',format:'letter',compress:true});
-    for(let i=0;i<pages.length;i++){
-      const canvas=await html2canvas(pages[i],{scale:1.25,useCORS:true,backgroundColor:'#ffffff',logging:false});
-      const image=canvas.toDataURL('image/jpeg',0.88);
-      if(i)pdf.addPage('letter','portrait');
-      pdf.addImage(image,'JPEG',0,0,612,792,undefined,'FAST');
-      canvas.width=1;canvas.height=1;
-    }
-    preparedPdf=pdf.output('blob');
-    $('#previewStatus').textContent=`${pages.length} pages ready`;
-    $('#sharePdf').disabled=false;$('#sharePdf').textContent='Share PDF';
   }catch(error){
     console.error(error);
     if(!$('#previewPages .print-sheet')){$('#previewStatus').textContent='Preview failed';$('#previewPages').innerHTML='<div class="preview-loading">The preview could not be created. Refresh the app and try again.</div>';}
-    $('#sharePdf').textContent='Use Print to share';
+    $('#sharePdf').textContent='Print / Save PDF';
   }
 }
 $('#printButton').addEventListener('click',preparePreview);
 $('#closePreview').addEventListener('click',()=>$('#previewScreen').classList.add('hidden'));
 $('#printPdf').addEventListener('click',()=>{void $('#printArea').offsetHeight;window.print();});
 $('#sharePdf').addEventListener('click',async()=>{
-  if(!preparedPdf)return;
+  if(!preparedPdf){window.print();return;}
   const jobs=state.jobs.filter(j=>j.status!=='reading');
   const name=jobs.length===1?`Route_${jobs[0].route}_Load_Map.pdf`:`PFG_Load_Maps_${jobs.length}_Routes.pdf`;
   const file=new File([preparedPdf],name,{type:'application/pdf'});
