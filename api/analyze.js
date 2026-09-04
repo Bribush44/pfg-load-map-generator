@@ -1,13 +1,8 @@
-import crypto from 'node:crypto';
-
 const schema={type:'object',additionalProperties:false,properties:{route:{type:'string'},door:{type:'string'},oppk:{type:'string'},date:{type:'string'},pallets:{type:'array',items:{type:'object',additionalProperties:false,properties:{pos:{type:'integer'},code:{type:'string'},cube:{type:'integer'},weight:{type:'integer'},qty:{type:'integer'},stops:{type:'string'}},required:['pos','code','cube','weight','qty','stops']}},barcodes:{type:'object',additionalProperties:false,properties:{dry:{type:'string'},cooler:{type:'string'},frozen:{type:'string'}},required:['dry','cooler','frozen']},review_notes:{type:'array',items:{type:'string'}}},required:['route','door','oppk','date','pallets','barcodes','review_notes']};
-
-function safeEqual(a,b){const x=Buffer.from(String(a||'')),y=Buffer.from(String(b||''));return x.length===y.length&&x.length>0&&crypto.timingSafeEqual(x,y)}
 
 export default async function handler(req,res){
   if(req.method!=='POST')return res.status(405).json({error:'POST required'});
-  if(!process.env.OPENAI_API_KEY||!process.env.APP_ACCESS_CODE)return res.status(503).json({error:'Server setup incomplete'});
-  if(!safeEqual(req.headers['x-app-code'],process.env.APP_ACCESS_CODE))return res.status(401).json({error:'Incorrect private app code'});
+  if(!process.env.OPENAI_API_KEY)return res.status(503).json({error:'Server setup incomplete'});
   const {image,trailer}=req.body||{};
   if(typeof image!=='string'||!image.startsWith('data:image/')||image.length>12_000_000)return res.status(400).json({error:'Invalid or oversized image'});
   try{
