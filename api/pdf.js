@@ -32,8 +32,9 @@ async function loadMapPage(doc,job){
   const cap=CAPACITY[job.trailer]||13,layout=cap+(cap%2),rows=Math.ceil(layout/2),rowH=Math.min(34,300/rows),top=138,w=274,gap=14;
   const pallets=[...(job.pallets||[])].sort((a,b)=>a.pos-b.pos);let main,hand;
   if(Number(job.trailer)===53){
-    const onboard=pallets.slice(0,cap),freezer=onboard.filter(p=>p.code?.[0]==='F'),combined=onboard.filter(p=>p.code?.[0]!=='F'),freezerBoundary=Math.ceil((freezer.length+1)/2)*2;
-    main=[...freezer.map((p,i)=>({...p,_slot:i+1,_source:p.pos})),...combined.map((p,i)=>({...p,_slot:freezerBoundary+i+1,_source:p.pos}))];hand=pallets.slice(cap);
+    const onboard=pallets.slice(0,cap),fixed=onboard.filter(p=>p.pos<=cap).map(p=>({...p,_slot:p.pos,_source:p.pos})),overflow=onboard.filter(p=>p.pos>cap),used=new Set(fixed.map(p=>p._slot));
+    const open=Array.from({length:cap},(_,i)=>i+1).filter(pos=>!used.has(pos));main=[...fixed];
+    overflow.forEach(p=>{let choices=open.filter(pos=>pos%2===p.pos%2);if(p.code?.[0]==='F')choices=choices.sort((a,b)=>a-b);else choices=choices.sort((a,b)=>b-a);const slot=(choices[0]??open[0]);if(slot){main.push({...p,_slot:slot,_source:p.pos});open.splice(open.indexOf(slot),1);}});hand=pallets.slice(cap);
   }else{main=pallets.filter(p=>p.pos<=cap).map(p=>({...p,_slot:p.pos,_source:p.pos}));hand=pallets.filter(p=>p.pos>cap);}
   const freezerEnd=Math.max(0,...main.filter(p=>p.code?.[0]==='F').map(p=>p._slot)),bulkRows=Math.ceil(freezerEnd/2);
   for(let row=0;row<rows;row++)for(let side=0;side<2;side++){
