@@ -90,6 +90,14 @@ mapPage=job=>{
 };
 function labelPage(job){const labels=[...job.pallets,...Array(Math.max(0,28-job.pallets.length)).fill(null)].slice(0,28);return`<section class="print-sheet"><div class="print-header"><img src="assets/pfg-logo-white.png"><h1>PALLET LABEL RECORD</h1><div class="meta">ROUTE ${escapeHtml(job.route)}<br>${escapeHtml(job.date)}</div></div><p style="font-size:8pt;color:#e31b23;font-weight:800">PRINT AT ACTUAL SIZE (100%) — EACH SPACE IS 2 × 1 INCH</p><div class="label-grid">${labels.map((p,i)=>`<div class="label-space"><strong>${p?`${p.code} | SOURCE POSITION ${p.pos}`:`EXTRA LABEL SPACE ${i+1}`}</strong><span>APPLY 2 × 1 LABEL HERE</span></div>`).join('')}</div><div class="label-footer"><span class="check"></span> ALL ${job.pallets.length} LABELS ATTACHED &nbsp;&nbsp; Loader: __________________ &nbsp;&nbsp; Time: __________</div></section>`}
 let preparedPdf=null;
+function showPagePreview(pages){
+  const scale=Math.min(.83,(window.innerWidth-24)/816);
+  $('#previewPages').innerHTML='';
+  pages.forEach(page=>{
+    const frame=document.createElement('div');frame.className='preview-page-frame';frame.style.height=`${1056*scale}px`;
+    const clone=page.cloneNode(true);clone.style.transform=`scale(${scale})`;clone.style.transformOrigin='top left';frame.appendChild(clone);$('#previewPages').appendChild(frame);
+  });
+}
 async function preparePreview(){
   const jobs=state.jobs.filter(j=>j.status!=='reading');
   if(!jobs.length){alert('Add and review at least one load map first.');return;}
@@ -104,13 +112,13 @@ async function preparePreview(){
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     document.querySelectorAll('#printArea .barcode').forEach(svg=>JsBarcode(svg,svg.dataset.value,{format:'CODE128',width:1.1,height:22,margin:0,fontSize:7,displayValue:true}));
     const pages=[...document.querySelectorAll('#printArea .print-sheet')];
+    showPagePreview(pages);
+    $('#previewStatus').textContent=`${pages.length} pages ready`;
+    $('#sharePdf').textContent='Preparing share file…';
     const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'pt',format:'letter',compress:true});
-    $('#previewPages').innerHTML='';
     for(let i=0;i<pages.length;i++){
-      $('#previewStatus').textContent=`Page ${i+1} of ${pages.length}`;
       const canvas=await html2canvas(pages[i],{scale:1.25,useCORS:true,backgroundColor:'#ffffff',logging:false});
       const image=canvas.toDataURL('image/jpeg',0.88);
-      const preview=document.createElement('img');preview.src=image;preview.alt=`PDF page ${i+1}`;$('#previewPages').appendChild(preview);
       if(i)pdf.addPage('letter','portrait');
       pdf.addImage(image,'JPEG',0,0,612,792,undefined,'FAST');
       canvas.width=1;canvas.height=1;
@@ -119,9 +127,9 @@ async function preparePreview(){
     $('#previewStatus').textContent=`${pages.length} pages ready`;
     $('#sharePdf').disabled=false;$('#sharePdf').textContent='Share PDF';
   }catch(error){
-    console.error(error);$('#previewStatus').textContent='Preview failed';
-    $('#previewPages').innerHTML='<div class="preview-loading">The PDF preview could not be created. Check your internet connection and try again.</div>';
-    $('#sharePdf').textContent='Share unavailable';
+    console.error(error);
+    if(!$('#previewPages .print-sheet')){$('#previewStatus').textContent='Preview failed';$('#previewPages').innerHTML='<div class="preview-loading">The preview could not be created. Refresh the app and try again.</div>';}
+    $('#sharePdf').textContent='Use Print to share';
   }
 }
 $('#printButton').addEventListener('click',preparePreview);
