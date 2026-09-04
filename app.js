@@ -108,13 +108,13 @@ async function preparePreview(){
   $('#printArea').innerHTML=jobs.map(j=>mapPage(j)+labelPage(j)).join('');
   preparedPdf=null;
   try{
-    await document.fonts?.ready;
-    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-    document.querySelectorAll('#printArea .barcode').forEach(svg=>JsBarcode(svg,svg.dataset.value,{format:'CODE128',width:1.1,height:22,margin:0,fontSize:7,displayValue:true}));
     const pages=[...document.querySelectorAll('#printArea .print-sheet')];
     showPagePreview(pages);
     $('#previewStatus').textContent=`${pages.length} pages ready`;
     $('#sharePdf').textContent='Preparing share file…';
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    if(window.JsBarcode){document.querySelectorAll('#printArea .barcode').forEach(svg=>window.JsBarcode(svg,svg.dataset.value,{format:'CODE128',width:1.1,height:22,margin:0,fontSize:7,displayValue:true}));showPagePreview(pages);}
+    if(!window.html2canvas||!window.jspdf)throw new Error('PDF tools did not load');
     const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'pt',format:'letter',compress:true});
     for(let i=0;i<pages.length;i++){
       const canvas=await html2canvas(pages[i],{scale:1.25,useCORS:true,backgroundColor:'#ffffff',logging:false});
