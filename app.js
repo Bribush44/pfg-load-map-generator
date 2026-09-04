@@ -42,6 +42,7 @@ async function addFiles(files){
     }catch(e){Object.assign(temp,parseText('',file,state.jobs.indexOf(temp)),{id:temp.id,preview:temp.preview,status:'review',error:e.message||'Automatic reading failed. Enter the values below.',barcodes:{dry:'',cooler:'',frozen:''}});}
     renderQueue();renderReviews();
   }
+  await preparePreview();
 }
 
 function renderQueue(){
@@ -89,42 +90,30 @@ mapPage=job=>{
   return mapPageWithoutBarcodes(job).replace('<div class="verification">',`${row}<div class="verification">`);
 };
 function labelPage(job){const labels=[...job.pallets,...Array(Math.max(0,28-job.pallets.length)).fill(null)].slice(0,28);return`<section class="print-sheet"><div class="print-header"><img src="assets/pfg-logo-white.png"><h1>PALLET LABEL RECORD</h1><div class="meta">ROUTE ${escapeHtml(job.route)}<br>${escapeHtml(job.date)}</div></div><p style="font-size:8pt;color:#e31b23;font-weight:800">PRINT AT ACTUAL SIZE (100%) — EACH SPACE IS 2 × 1 INCH</p><div class="label-grid">${labels.map((p,i)=>`<div class="label-space"><strong>${p?`${p.code} | SOURCE POSITION ${p.pos}`:`EXTRA LABEL SPACE ${i+1}`}</strong><span>APPLY 2 × 1 LABEL HERE</span></div>`).join('')}</div><div class="label-footer"><span class="check"></span> ALL ${job.pallets.length} LABELS ATTACHED &nbsp;&nbsp; Loader: __________________ &nbsp;&nbsp; Time: __________</div></section>`}
-let preparedPdf=null;
-function showPagePreview(pages){
-  const scale=Math.min(.83,(window.innerWidth-24)/816);
-  $('#previewPages').innerHTML='';
-  pages.forEach(page=>{
-    const frame=document.createElement('div');frame.className='preview-page-frame';frame.style.height=`${1056*scale}px`;
-    const clone=page.cloneNode(true);clone.style.transform=`scale(${scale})`;clone.style.transformOrigin='top left';frame.appendChild(clone);$('#previewPages').appendChild(frame);
-  });
-}
+let preparedPdf=null,preparedPdfUrl='';
 async function preparePreview(){
   const jobs=state.jobs.filter(j=>j.status!=='reading');
   if(!jobs.length){alert('Add and review at least one load map first.');return;}
   $('#previewScreen').classList.remove('hidden');
   $('#previewPages').innerHTML='<div class="preview-loading">Preparing printable pages…</div>';
   $('#previewStatus').textContent='Preparing…';
-  $('#sharePdf').disabled=true;$('#sharePdf').textContent='Preparing preview…';
-  $('#printArea').innerHTML=jobs.map(j=>mapPage(j)+labelPage(j)).join('');
+  $('#sharePdf').disabled=true;$('#sharePdf').textContent='Generating PDF…';$('#printPdf').disabled=true;
   preparedPdf=null;
   try{
-    const pages=[...document.querySelectorAll('#printArea .print-sheet')];
-    showPagePreview(pages);
-    $('#previewStatus').textContent=`${pages.length} pages ready`;
-    $('#sharePdf').disabled=false;$('#sharePdf').textContent='Print / Save PDF';
-    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-    if(window.JsBarcode){document.querySelectorAll('#printArea .barcode').forEach(svg=>window.JsBarcode(svg,svg.dataset.value,{format:'CODE128',width:1.1,height:22,margin:0,fontSize:7,displayValue:true}));showPagePreview(pages);}
+    const response=await fetch('/api/pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobs})});
+    if(!response.ok){const problem=await response.json().catch(()=>({}));throw new Error(problem.error||`PDF service returned ${response.status}`);}
+    preparedPdf=await response.blob();if(preparedPdfUrl)URL.revokeObjectURL(preparedPdfUrl);preparedPdfUrl=URL.createObjectURL(preparedPdf);
+    $('#previewPages').innerHTML=`<iframe class="pdf-preview-frame" title="Generated load map PDF" src="${preparedPdfUrl}"></iframe>`;
+    $('#previewStatus').textContent=`${jobs.length*2} pages ready`;$('#sharePdf').disabled=false;$('#sharePdf').textContent='Share PDF';$('#printPdf').disabled=false;$('#printPdf').textContent='Open / Print PDF';
   }catch(error){
-    console.error(error);
-    if(!$('#previewPages .print-sheet')){$('#previewStatus').textContent='Preview failed';$('#previewPages').innerHTML='<div class="preview-loading">The preview could not be created. Refresh the app and try again.</div>';}
-    $('#sharePdf').textContent='Print / Save PDF';
+    console.error(error);$('#previewStatus').textContent='PDF failed';$('#previewPages').innerHTML=`<div class="preview-loading">${escapeHtml(error.message||'The PDF could not be generated.')}</div>`;$('#sharePdf').textContent='Share unavailable';
   }
 }
 $('#printButton').addEventListener('click',preparePreview);
 $('#closePreview').addEventListener('click',()=>$('#previewScreen').classList.add('hidden'));
-$('#printPdf').addEventListener('click',()=>{void $('#printArea').offsetHeight;window.print();});
+$('#printPdf').addEventListener('click',()=>{if(preparedPdfUrl)window.open(preparedPdfUrl,'_blank');});
 $('#sharePdf').addEventListener('click',async()=>{
-  if(!preparedPdf){window.print();return;}
+  if(!preparedPdf)return;
   const jobs=state.jobs.filter(j=>j.status!=='reading');
   const name=jobs.length===1?`Route_${jobs[0].route}_Load_Map.pdf`:`PFG_Load_Maps_${jobs.length}_Routes.pdf`;
   const file=new File([preparedPdf],name,{type:'application/pdf'});
