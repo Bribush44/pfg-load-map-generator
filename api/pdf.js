@@ -4,10 +4,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const CAPACITY={28:13,36:17,48:23,53:26};
+const SPECIAL_CODES=new Set(['40','42','53','71','81']);
 const colors={freezer:'#dceeff',cooler:'#dff3ed',dry:'#fff0d6',special:'#ffe1e1'};
 const safe=v=>String(v??'').replace(/[^\x20-\x7E]/g,' ').slice(0,80);
 const zone=c=>c?.[0]==='F'?'freezer':c?.[0]==='R'?'cooler':'dry';
 const restraint=p=>p.weight>1200?(p.code?.[0]==='F'?'LOAD LOCK':'STRAP'):'';
+const isSpecial=p=>SPECIAL_CODES.has(String(p?.specialCode||''));
+const stopNumbers=value=>{const text=String(value||'').trim(),range=text.match(/^(\d+)\s*-\s*(\d+)$/);if(range){const from=+range[1],to=+range[2];if(to>=from&&to-from<=50)return new Set(Array.from({length:to-from+1},(_,i)=>from+i));}return new Set((text.match(/\d+/g)||[]).map(Number));};
+const matchingFreezer=(special,pallets)=>{const wanted=stopNumbers(special.stops);return pallets.find(p=>p.code?.[0]==='F'&&[...stopNumbers(p.stops)].some(stop=>wanted.has(stop)));};
+const specialPlacement=(item,pallets)=>{
+  if(item.specialCode==='40')return'DRY PIR - BACK LEFT';
+  if(item.specialCode==='42')return'CHEMICALS - BACK RIGHT';
+  if(item.specialCode==='81')return'SEAFOOD - BACK LEFT - TAKE PHOTO / SEND TO GROUP CHAT';
+  if(item.specialCode==='53'){const pos2=pallets.find(p=>p.pos===2);return pos2?`ICE CREAM - STACK ON ${safe(pos2.code)} PALLET IN POS 2`:'ICE CREAM - STACK IN POS 2 IN FRONT OF DOOR';}
+  if(item.specialCode==='71'){const target=matchingFreezer(item,pallets);return target?`FREEZER PIR - STACK ON ${safe(target.code)} POS ${target.pos} - MATCH STOP ${safe(item.stops)}`:`FREEZER PIR - FIND FREEZER PALLET FOR STOP ${safe(item.stops)} - VERIFY`;}
+  return'HAND STACK - VERIFY LOCATION';
+};
 const check=(doc,x,y,label)=>{doc.rect(x,y,8,8).stroke('#111');doc.fontSize(6).fillColor('#111').text(label,x+12,y+1);};
 const box=(doc,x,y,w,label,value)=>{doc.roundedRect(x,y,w,34,4).stroke('#222');doc.fontSize(5).fillColor('#555').text(label,x+6,y+4);doc.font('Helvetica-Bold').fontSize(11).fillColor('#111').text(safe(value),x+6,y+13,{width:w-12});doc.font('Helvetica');};
 
@@ -30,33 +42,37 @@ async function loadMapPage(doc,job){
   doc.font('Helvetica-Bold').fontSize(7).fillColor('#111').text('NOSE / FRONT OF TRAILER',20,112,{width:572,align:'center'});
   doc.fontSize(6).text('LEFT SIDE - ODD POSITIONS',26,125,{width:272,align:'center'}).text('RIGHT SIDE - EVEN POSITIONS',314,125,{width:272,align:'center'});
   const cap=CAPACITY[job.trailer]||13,layout=cap+(cap%2),rows=Math.ceil(layout/2),rowH=Math.min(34,300/rows),top=138,w=274,gap=14;
-  const pallets=[...(job.pallets||[])].sort((a,b)=>a.pos-b.pos);let main,hand;
+  const sourceRows=[...(job.pallets||[])].sort((a,b)=>a.pos-b.pos),specials=sourceRows.filter(isSpecial),pallets=sourceRows.filter(p=>!isSpecial(p));let main,hand;
   if(Number(job.trailer)===53){
     const onboard=pallets.slice(0,cap),fixed=onboard.filter(p=>p.pos<=cap).map(p=>({...p,_slot:p.pos,_source:p.pos})),overflow=onboard.filter(p=>p.pos>cap),used=new Set(fixed.map(p=>p._slot));
     const open=Array.from({length:cap},(_,i)=>i+1).filter(pos=>!used.has(pos));main=[...fixed];
     overflow.forEach(p=>{let choices=open.filter(pos=>pos%2===p.pos%2);if(p.code?.[0]==='F')choices=choices.sort((a,b)=>a-b);else choices=choices.sort((a,b)=>b-a);const slot=(choices[0]??open[0]);if(slot){main.push({...p,_slot:slot,_source:p.pos});open.splice(open.indexOf(slot),1);}});hand=pallets.slice(cap);
   }else{main=pallets.filter(p=>p.pos<=cap).map(p=>({...p,_slot:p.pos,_source:p.pos}));hand=pallets.filter(p=>p.pos>cap);}
-  const freezerEnd=Math.max(0,...main.filter(p=>p.code?.[0]==='F').map(p=>p._slot)),bulkRows=Math.ceil(freezerEnd/2),doorSpaces=Array.from({length:cap},(_,i)=>i+1).filter(pos=>!main.some(p=>p._slot===pos)&&!(Number(job.trailer)===53&&pos>24));
+  const freezerEnd=Math.max(0,...main.filter(p=>p.code?.[0]==='F').map(p=>p._slot)),bulkRows=Math.ceil(freezerEnd/2),iceCreamInPos2=specials.some(p=>p.specialCode==='53')&&!main.some(p=>p._slot===2),doorSpaces=Array.from({length:cap},(_,i)=>i+1).filter(pos=>!main.some(p=>p._slot===pos)&&!(iceCreamInPos2&&pos===2)&&!(Number(job.trailer)===53&&pos>24));
   for(let row=0;row<rows;row++)for(let side=0;side<2;side++){
     const pos=row*2+side+1,x=22+side*(w+gap),y=top+row*rowH+(row>=bulkRows?14:0),p=main.find(v=>v._slot===pos),partial=pos>cap,z=p?zone(p.code):'special';
     doc.roundedRect(x,y,w,rowH-3,4).fillAndStroke(colors[z],'#555');doc.fillColor('#111').font('Helvetica-Bold').fontSize(8).text(String(pos),x+6,y+6,{width:18});
     if(partial){doc.fontSize(7).text('HAND STACK AREA - PARTIAL SPACE',x+28,y+8,{width:w-34});continue;}
-    if(!p){const available=Number(job.trailer)===53&&pos>24,blank=available?'AVAILABLE PINWHEEL SPACE':pos<=freezerEnd?'DOOR SPACE / FREEZER PIR':'DOOR SPACE';doc.fontSize(7).text(blank,x+28,y+7,{width:w-115});if(!available)check(doc,x+w-75,y+rowH-14,'LOAD LOCK');continue;}
+    if(!p){const available=Number(job.trailer)===53&&pos>24;if(iceCreamInPos2&&pos===2){doc.fontSize(7).fillColor('#9b1017').text('ICE CREAM HAND STACK - IN FRONT OF DOOR',x+28,y+7,{width:w-115});check(doc,x+w-75,y+rowH-14,'LOAD');continue;}const blank=available?'AVAILABLE PINWHEEL SPACE':pos<=freezerEnd?'DOOR SPACE / FREEZER PIR':'DOOR SPACE';doc.fontSize(7).text(blank,x+28,y+7,{width:w-115});if(!available)check(doc,x+w-75,y+rowH-14,'LOAD LOCK');continue;}
     doc.fontSize(11).text(safe(p.code),x+28,y+3,{width:45});doc.font('Helvetica').fontSize(6).text(`${Number(p.weight).toLocaleString()} lb | Qty ${p.qty} | Stops ${safe(p.stops)}${p._source!==pos?` | Src ${p._source}`:''}`,x+75,y+5,{width:125});
     const flags=[p.code?.[0]!=='F'&&pos%2===1?'P - ROTATE':'',restraint(p)].filter(Boolean).join(' / ');doc.font('Helvetica-Bold').fontSize(5).fillColor('#c00').text(flags,x+198,y+3,{width:70,align:'right'});check(doc,x+202,y+rowH-14,'LOAD');
   }
   const bulkY=top+bulkRows*rowH;doc.rect(22,bulkY,562,11).fill('#111');doc.font('Helvetica-Bold').fontSize(5).fillColor('#fff').text('INSULATED BULKHEAD / BUN - FREEZER ABOVE | COOLER + DRY BELOW',24,bulkY+3,{width:558,align:'center'});
   let y=top+rows*rowH+18;
   if(hand.length){doc.roundedRect(22,y,562,42,4).fillAndStroke('#fff6f6','#c00');doc.font('Helvetica-Bold').fontSize(7).fillColor('#c00').text('HAND STACK ON BACK - OVER CAPACITY',28,y+4);doc.font('Helvetica').fontSize(6).fillColor('#111').text(hand.map(p=>`${safe(p.code)} ${p.weight}lb Qty ${p.qty}${p.weight>200?' REVIEW':''}`).join('   |   '),28,y+15,{width:550,height:22});y+=48;}
+  if(specials.length){
+    const panelH=22+specials.length*13;doc.roundedRect(22,y,562,panelH,4).fillAndStroke('#fff8e9','#a8660f');doc.font('Helvetica-Bold').fontSize(7).fillColor('#7a4708').text('SPECIAL HAND-STACK ITEMS - NOT PALLET SPACES',28,y+4);let sy=y+15;
+    specials.forEach(item=>{const warning=Number(item.weight)>200?' - OVER 200 LB: REVIEW / COMBINE':'';check(doc,28,sy,`CODE ${item.specialCode} | ${safe(item.code)} | ${item.weight} lb | Qty ${item.qty} | ${specialPlacement(item,pallets)}${warning}`);sy+=13;});y+=panelH+6;
+  }
   const totals={freezer:{p:0,w:0,q:0},cooler:{p:0,w:0,q:0},dry:{p:0,w:0,q:0}};pallets.forEach(p=>{const z=totals[zone(p.code)];z.p++;z.w+=Number(p.weight)||0;z.q+=Number(p.qty)||0;});
   doc.roundedRect(22,y,562,55,4).stroke('#555');doc.font('Helvetica-Bold').fontSize(7).fillColor('#111').text('COMPARTMENT TOTALS',28,y+4);let ty=y+16;Object.entries(totals).forEach(([k,v])=>{doc.fontSize(6).text(`${k.toUpperCase()}:  ${v.p} pallets   |   ${v.w.toLocaleString()} lb   |   Qty ${v.q}`,28,ty);ty+=10;});y+=61;
   const bw=180;await barcode(doc,'DRY LOADING ASSIGNMENT',job.barcodes?.dry,22,y,bw);await barcode(doc,'COOLER LOADING ASSIGNMENT',job.barcodes?.cooler,216,y,bw);await barcode(doc,'FROZEN LOADING ASSIGNMENT',job.barcodes?.frozen,410,y,174);y+=52;
-  const straps=pallets.filter(p=>restraint(p)==='STRAP').length,locks=pallets.filter(p=>restraint(p)==='LOAD LOCK').length+doorSpaces.length;check(doc,24,y,`PALLETS ${pallets.length}`);check(doc,145,y,`HAND STACK ${hand.length}`);check(doc,292,y,`STRAPS ${straps}`);check(doc,430,y,`LOAD LOCKS ${locks}`);
+  const straps=pallets.filter(p=>restraint(p)==='STRAP').length,locks=pallets.filter(p=>restraint(p)==='LOAD LOCK').length+doorSpaces.length;check(doc,24,y,`PALLETS ${pallets.length}`);check(doc,145,y,`HAND STACK ${hand.length+specials.length}`);check(doc,292,y,`STRAPS ${straps}`);check(doc,430,y,`LOAD LOCKS ${locks}`);
 }
 
 function labelPage(doc,job){
   header(doc,job,'PALLET LABEL RECORD');doc.font('Helvetica-Bold').fontSize(7).fillColor('#c00').text('PRINT AT ACTUAL SIZE (100%) - EACH SPACE IS 2 x 1 INCH',20,72,{width:572,align:'center'});
-  const pallets=job.pallets||[];for(let i=0;i<28;i++){const col=i%4,row=Math.floor(i/4),x=18+col*144,y=88+row*72,p=pallets[i];doc.rect(x,y,144,72).stroke('#888');doc.font('Helvetica-Bold').fontSize(6).fillColor('#111').text(p?`${safe(p.code)} | SOURCE POSITION ${p.pos}`:`EXTRA LABEL SPACE ${i+1}`,x+5,y+5,{width:134});doc.font('Helvetica').fontSize(6).fillColor('#777').text('APPLY 2 x 1 LABEL HERE',x+5,y+32,{width:134,align:'center'});}
+  const pallets=job.pallets||[];for(let i=0;i<28;i++){const col=i%4,row=Math.floor(i/4),x=18+col*144,y=88+row*72,p=pallets[i],special=p?.specialCode?` | HAND STACK ${safe(p.specialCode)}`:'';doc.rect(x,y,144,72).stroke('#888');doc.font('Helvetica-Bold').fontSize(6).fillColor('#111').text(p?`${safe(p.code)} | SOURCE POSITION ${p.pos}${special}`:`EXTRA LABEL SPACE ${i+1}`,x+5,y+5,{width:134});doc.font('Helvetica').fontSize(6).fillColor('#777').text('APPLY 2 x 1 LABEL HERE',x+5,y+32,{width:134,align:'center'});}
   check(doc,24,612,`ALL ${pallets.length} LABELS ATTACHED`);doc.fontSize(8).fillColor('#111').text('Loader: ____________________    Time: __________',210,612);
 }
 

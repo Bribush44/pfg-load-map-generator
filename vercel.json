@@ -1,4 +1,4 @@
 {
-  "functions": {"api/analyze.js": {"maxDuration": 60}, "api/pdf.js": {"maxDuration": 60}, "api/dispatch.js": {"maxDuration": 30}},
+  "functions": {"api/analyze.js": {"maxDuration": 60}, "api/pdf.js": {"maxDuration": 60}, "api/dispatch.js": {"maxDuration": 30}, "api/dispatch-photo.js": {"maxDuration": 60}},
   "headers": [{"source":"/api/(.*)","headers":[{"key":"Cache-Control","value":"no-store"}]}]
 }

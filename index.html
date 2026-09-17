@@ -21,7 +21,7 @@
   <header class="app-header">
     <img src="assets/pfg-logo-white.png" alt="Performance Food Group">
     <div><h1>Load Map Generator</h1><p>Camera to printable loading map</p></div>
-    <span class="version-badge">VERSION 18</span>
+    <span class="version-badge">VERSION 19</span>
   </header>
 
   <main id="workspace">
@@ -29,8 +29,13 @@
       <div class="step">1</div>
       <div class="card-body">
         <h2>Upload tonight's dispatch</h2>
-        <p class="hint">Upload the Excel dispatch once. The app matches each photographed route to the TRAILER column and uses its first two digits for the trailer size.</p>
-        <label class="primary-button file-button">Choose dispatch file<input id="dispatchInput" type="file" accept=".xlsx,.xls,.csv" hidden></label>
+        <p class="hint">Upload the Excel file or photograph the dispatch pages. The app matches Route/RT# to the TRAILER column and uses its first two digits for the size.</p>
+        <label class="primary-button file-button">Choose Excel dispatch<input id="dispatchInput" type="file" accept=".xlsx,.xls,.csv" hidden></label>
+        <div class="dispatch-photo-actions">
+          <label class="secondary-button">Take dispatch photo<input id="dispatchCameraInput" type="file" accept="image/*" capture="environment" hidden></label>
+          <label class="secondary-button">Choose dispatch photos<input id="dispatchPhotosInput" type="file" accept="image/*" multiple hidden></label>
+        </div>
+        <p class="mini-hint">Take as many pictures as needed. Each picture adds more routes to tonight's list.</p>
         <div id="dispatchStatus" class="dispatch-status" aria-live="polite">No dispatch loaded yet.</div>
       </div>
     </section>

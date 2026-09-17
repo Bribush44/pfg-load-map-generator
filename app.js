@@ -1,5 +1,6 @@
 const CAPACITY={28:{standard:12,pinwheel:13},36:{standard:16,pinwheel:17},48:{standard:22,pinwheel:23},53:{standard:24,pinwheel:26}};
-const state={jobs:[],dispatchRoutes:new Map(),dispatchLoaded:false,dispatchName:''};
+const SPECIAL_CODES=new Set(['40','42','53','71','81']);
+const state={jobs:[],dispatchRoutes:new Map(),dispatchLoaded:false,dispatchName:'',dispatchPhotoCount:0};
 const $=s=>document.querySelector(s);
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const trailerSize=()=>Number(document.querySelector('input[name="trailer"]:checked').value);
@@ -15,6 +16,13 @@ function applyDispatchTrailer(job){
   }
 }
 
+function mergeDispatchRows(rows,{replace=false}={}){
+  if(replace)state.dispatchRoutes=new Map();
+  (rows||[]).forEach(row=>{if(routeKey(row.route)&&[28,36,48,53].includes(Number(row.trailer)))state.dispatchRoutes.set(routeKey(row.route),row);});
+  state.dispatchLoaded=state.dispatchRoutes.size>0;
+  state.jobs.filter(job=>job.status!=='reading').forEach(applyDispatchTrailer);
+}
+
 async function loadDispatch(file){
   if(!file)return;
   const status=$('#dispatchStatus');status.className='dispatch-status loading';status.textContent=`Reading ${file.name}…`;
@@ -23,13 +31,30 @@ async function loadDispatch(file){
     const response=await fetch('/api/dispatch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file:base64,name:file.name})});
     const result=await response.json().catch(()=>({error:`Dispatch service returned ${response.status}`}));
     if(!response.ok)throw new Error(result.error||'Dispatch could not be read.');
-    state.dispatchRoutes=new Map((result.routes||[]).map(row=>[routeKey(row.route),row]));state.dispatchLoaded=true;state.dispatchName=file.name;
-    state.jobs.filter(job=>job.status!=='reading').forEach(applyDispatchTrailer);
+    mergeDispatchRows(result.routes,{replace:true});state.dispatchName=file.name;state.dispatchPhotoCount=0;
     status.className='dispatch-status ready';status.innerHTML=`<strong>${escapeHtml(file.name)}</strong><span>${result.count} routes ready · ${result.sheets} day sheets read</span>${result.warnings?.length?`<small>${escapeHtml(result.warnings.join(' · '))}</small>`:''}`;
     renderQueue();renderReviews();
   }catch(error){
     state.dispatchRoutes=new Map();state.dispatchLoaded=false;state.dispatchName='';status.className='dispatch-status error';status.textContent=error.message||'Dispatch could not be read.';
   }
+}
+
+async function loadDispatchPhotos(files){
+  if(!files.length)return;
+  const status=$('#dispatchStatus'),warnings=[];let added=0;
+  status.className='dispatch-status loading';
+  try{
+    for(let i=0;i<files.length;i++){
+      status.textContent=`Reading dispatch photo ${i+1} of ${files.length}…`;
+      const response=await fetch('/api/dispatch-photo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:await imageData(files[i])})});
+      const result=await response.json().catch(()=>({error:`Photo service returned ${response.status}`}));
+      if(!response.ok)throw new Error(result.error||`Dispatch photo ${i+1} could not be read.`);
+      mergeDispatchRows(result.routes);added+=result.routes?.length||0;warnings.push(...(result.review_notes||[]));state.dispatchPhotoCount++;
+    }
+    state.dispatchName=`${state.dispatchPhotoCount} dispatch photo${state.dispatchPhotoCount===1?'':'s'}`;
+    status.className='dispatch-status ready';status.innerHTML=`<strong>${escapeHtml(state.dispatchName)}</strong><span>${state.dispatchRoutes.size} routes ready · ${added} rows read in this batch</span>${warnings.length?`<small>Review: ${escapeHtml(warnings.join(' · '))}</small>`:''}`;
+    renderQueue();renderReviews();
+  }catch(error){status.className='dispatch-status error';status.textContent=error.message||'The dispatch photos could not be read.';}
 }
 async function imageData(file){
   const url=URL.createObjectURL(file),image=new Image();
@@ -55,7 +80,7 @@ function parseText(text,file,index){
   const door=(clean.match(/DockDr\s*\n?\s*(\d+)/i)||[])[1]||'25';
   const pallets=[];
   const rx=/\b(\d{1,2})\s+([FRD]\d{2})\s+(\d{1,3})\s+(\d{1,5})\s+(\d{1,4})\s+([0-9 -]{1,7})/gi;
-  let m; while((m=rx.exec(clean))){pallets.push({pos:+m[1],code:m[2].toUpperCase(),cube:+m[3],weight:+m[4],qty:+m[5],stops:m[6].trim().replace(/\s+/g,'-')});}
+  let m; while((m=rx.exec(clean))){pallets.push({pos:+m[1],code:m[2].toUpperCase(),cube:+m[3],weight:+m[4],qty:+m[5],stops:m[6].trim().replace(/\s+/g,'-'),specialCode:''});}
   return{id:crypto.randomUUID(),fileName:file.name,route,date,oppk,door,trailer:trailerSize(),trailerSource:'manual',pallets,raw:text,status:'ready'};
 }
 
@@ -75,30 +100,32 @@ async function addFiles(files){
 }
 
 function renderQueue(){
-  $('#queue').innerHTML=state.jobs.map(j=>`<div class="queue-item"><img src="${j.preview||''}" alt=""><div><strong>${escapeHtml(j.fileName)}</strong><small>${j.status==='reading'?'OpenAI is reading the sheet…':`Ready to review · ${j.pallets?.length||0} pallets · ${j.trailer||trailerSize()} ft`}</small>${j.trailerSource==='dispatch'?`<small class="match-ok">Dispatch match: ${escapeHtml(j.route)} → ${j.trailer} ft</small>`:''}${j.trailerSource==='missing'?'<small class="match-missing">Route not found in dispatch — check trailer size</small>':''}${j.error?`<small class="tag">${escapeHtml(j.error)}</small>`:''}${j.status==='reading'?'<div class="progress"><i style="width:65%"></i></div>':''}</div></div>`).join('');
+  $('#queue').innerHTML=state.jobs.map(j=>{const regular=(j.pallets||[]).filter(p=>!SPECIAL_CODES.has(String(p.specialCode||''))).length,special=(j.pallets||[]).length-regular;return`<div class="queue-item"><img src="${j.preview||''}" alt=""><div><strong>${escapeHtml(j.fileName)}</strong><small>${j.status==='reading'?'OpenAI is reading the sheet…':`Ready to review · ${regular} pallets${special?` · ${special} hand stack`:''} · ${j.trailer||trailerSize()} ft`}</small>${j.trailerSource==='dispatch'?`<small class="match-ok">Dispatch match: ${escapeHtml(j.route)} → ${j.trailer} ft</small>`:''}${j.trailerSource==='missing'?'<small class="match-missing">Route not found in dispatch — check trailer size</small>':''}${j.error?`<small class="tag">${escapeHtml(j.error)}</small>`:''}${j.status==='reading'?'<div class="progress"><i style="width:65%"></i></div>':''}</div></div>`}).join('');
 }
 
-function palletLines(job){return job.pallets.map(p=>`${p.pos}, ${p.code}, ${p.weight}, ${p.qty}, ${p.stops}`).join('\n');}
-function parseLines(value){return value.split('\n').map(line=>line.trim()).filter(Boolean).map(line=>{const a=line.split(',').map(x=>x.trim());return{pos:+a[0],code:(a[1]||'').toUpperCase(),weight:+a[2]||0,qty:+a[3]||0,stops:a[4]||''};}).filter(p=>p.pos&&/^[FRD]\d{2}$/.test(p.code));}
+function palletLines(job){return job.pallets.map(p=>`${p.pos}, ${p.code}, ${p.weight}, ${p.qty}, ${p.stops}, ${p.specialCode||''}`).join('\n');}
+function parseLines(value){return value.split('\n').map(line=>line.trim()).filter(Boolean).map(line=>{const a=line.split(',').map(x=>x.trim()),specialCode=SPECIAL_CODES.has(a[5])?a[5]:'';return{pos:+a[0],code:(a[1]||'').toUpperCase(),weight:+a[2]||0,qty:+a[3]||0,stops:a[4]||'',specialCode};}).filter(p=>p.pos&&/^[FRD]\d{2}$/.test(p.code));}
 
 function renderReviews(){
   const ready=state.jobs.filter(j=>j.status!=='reading');
   $('#reviewSection').classList.toggle('hidden',!ready.length);$('#finishSection').classList.toggle('hidden',!ready.length);
   $('#routeCount').textContent=`${ready.length} route${ready.length===1?'':'s'}`;
-  $('#reviews').innerHTML=ready.map((j,i)=>`<details class="route-review" open><summary class="route-summary"><span>${escapeHtml(j.route)}</span><span>${j.pallets.length} pallets</span></summary><div class="route-fields">
+  $('#reviews').innerHTML=ready.map((j,i)=>{const regular=j.pallets.filter(p=>!SPECIAL_CODES.has(String(p.specialCode||''))).length,special=j.pallets.length-regular;return`<details class="route-review" open><summary class="route-summary"><span>${escapeHtml(j.route)}</span><span>${regular} pallets${special?` + ${special} hand stack`:''}</span></summary><div class="route-fields">
     <label>Route #<input data-id="${j.id}" data-key="route" value="${escapeHtml(j.route)}"></label><label>Door<input data-id="${j.id}" data-key="door" value="${escapeHtml(j.door)}"></label>
     <label>Trailer size<select data-id="${j.id}" data-key="trailer">${[28,36,48,53].map(size=>`<option value="${size}" ${Number(j.trailer)===size?'selected':''}>${size} ft</option>`).join('')}</select><small class="trailer-source ${j.trailerSource==='dispatch'?'matched':j.trailerSource==='missing'?'missing':''}">${j.trailerSource==='dispatch'?`Matched from ${escapeHtml(j.dispatchMatch?.sheet||'dispatch')} · ${escapeHtml(j.dispatchMatch?.trailerNumber||'')}`:j.trailerSource==='missing'?'Not found in dispatch — manual selection required':'Manual fallback'}</small></label>
     <label>OPPK<input data-id="${j.id}" data-key="oppk" value="${escapeHtml(j.oppk)}"></label><label>Date<input data-id="${j.id}" data-key="date" value="${escapeHtml(j.date)}"></label>
     <label>Dry barcode<input data-id="${j.id}" data-key="barcode-dry" value="${escapeHtml(j.barcodes?.dry||'')}"></label><label>Cooler barcode<input data-id="${j.id}" data-key="barcode-cooler" value="${escapeHtml(j.barcodes?.cooler||'')}"></label>
     <label>Frozen barcode<input data-id="${j.id}" data-key="barcode-frozen" value="${escapeHtml(j.barcodes?.frozen||'')}"></label><span></span>
     ${j.review_notes?.length?`<div class="full tag"><b>AI REVIEW:</b> ${escapeHtml(j.review_notes.join(' · '))}</div>`:''}
-    <label class="full">Pallets — one per line: position, code, weight, quantity, stops<textarea data-id="${j.id}" data-key="pallets">${escapeHtml(palletLines(j))}</textarea></label>
-  </div></details>`).join('');
+    <label class="full">Rows — position, pallet code, weight, quantity, stops, hand-stack code<textarea data-id="${j.id}" data-key="pallets">${escapeHtml(palletLines(j))}</textarea><small class="field-help">Hand-stack codes: 40 Dry PIR · 42 Chemicals · 53 Ice Cream · 71 Freezer PIR · 81 Seafood</small></label>
+  </div></details>`}).join('');
 }
 
 document.addEventListener('input',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id)return;const job=state.jobs.find(j=>j.id===id);if(key==='pallets')job.pallets=parseLines(e.target.value);else if(key.startsWith('barcode-')){job.barcodes=job.barcodes||{};job.barcodes[key.slice(8)]=e.target.value.trim();}else if(key==='trailer'){job.trailer=Number(e.target.value);job.trailerSource='manual';job.dispatchMatch=null;}else job[key]=e.target.value;});
 document.addEventListener('change',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id||key!=='route')return;const job=state.jobs.find(j=>j.id===id);applyDispatchTrailer(job);renderQueue();renderReviews();});
 $('#dispatchInput').addEventListener('change',e=>loadDispatch(e.target.files?.[0]));
+$('#dispatchCameraInput').addEventListener('change',async e=>{await loadDispatchPhotos([...e.target.files]);e.target.value='';});
+$('#dispatchPhotosInput').addEventListener('change',async e=>{await loadDispatchPhotos([...e.target.files]);e.target.value='';});
 $('#cameraInput').addEventListener('change',e=>addFiles([...e.target.files]));$('#batchInput').addEventListener('change',e=>addFiles([...e.target.files]));
 $('#clearButton').addEventListener('click',()=>{state.jobs.forEach(j=>j.preview&&URL.revokeObjectURL(j.preview));state.jobs=[];renderQueue();renderReviews();$('#printArea').innerHTML='';});
 
