@@ -79,5 +79,6 @@ function labelPage(doc,job){
 export default async function handler(req,res){
   if(req.method!=='POST')return res.status(405).json({error:'POST required'});
   const jobs=Array.isArray(req.body?.jobs)?req.body.jobs.slice(0,25):[];if(!jobs.length)return res.status(400).json({error:'No load maps supplied'});
+  if(jobs.some(job=>![28,36,48,53].includes(Number(job.trailer))))return res.status(400).json({error:'Every route must have a valid trailer size matched from the dispatch.'});
   try{const doc=new PDFDocument({size:'LETTER',margin:0,autoFirstPage:false,compress:true}),chunks=[];doc.on('data',c=>chunks.push(c));const done=new Promise((resolve,reject)=>{doc.on('end',resolve);doc.on('error',reject);});for(const job of jobs){doc.addPage();await loadMapPage(doc,job);doc.addPage();labelPage(doc,job);}doc.end();await done;const pdf=Buffer.concat(chunks);res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`inline; filename="PFG_Load_Maps.pdf"`);res.setHeader('Cache-Control','no-store');return res.status(200).send(pdf);}catch(error){return res.status(500).json({error:error.message||'PDF generation failed'});}
 }

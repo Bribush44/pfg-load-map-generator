@@ -11,3 +11,4 @@
 @media print{body{background:white}.app-header,#workspace,.install-button,dialog,.preview-screen{display:none!important}#printArea{position:static;left:auto;top:auto;display:block}.print-sheet{margin:0}@page{size:letter;margin:0}}
 .field-help{display:block;margin-top:4px;color:var(--muted);font-size:.68rem;text-transform:none}
 .dispatch-photo-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.dispatch-photo-actions .secondary-button{font-size:.86rem;padding:11px 8px}.mini-hint{margin:7px 0 0;color:var(--muted);font-size:.75rem}
+.trailer-readout{margin-top:4px;border:1px solid var(--line);border-radius:7px;padding:9px;background:#f7f7f7;font-size:1rem}.trailer-readout.matched{border-color:#26816d;background:#f0faf7;color:#175c4d}.trailer-readout.missing{border-color:var(--red);background:#fff1f1;color:#a20d14}

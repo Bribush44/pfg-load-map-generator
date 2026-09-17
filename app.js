@@ -3,7 +3,6 @@ const SPECIAL_CODES=new Set(['40','42','53','71','81']);
 const state={jobs:[],dispatchRoutes:new Map(),dispatchLoaded:false,dispatchName:'',dispatchPhotoCount:0};
 const $=s=>document.querySelector(s);
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const trailerSize=()=>Number(document.querySelector('input[name="trailer"]:checked').value);
 const routeKey=value=>String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 const readAsDataUrl=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('The dispatch file could not be opened.'));reader.readAsDataURL(file);});
 
@@ -12,7 +11,7 @@ function applyDispatchTrailer(job){
   if(match){
     job.trailer=Number(match.trailer);job.trailerSource='dispatch';job.dispatchMatch=match;
   }else{
-    job.trailer=Number(job.trailer)||trailerSize();job.trailerSource=state.dispatchLoaded?'missing':'manual';job.dispatchMatch=null;
+    job.trailer=null;job.trailerSource='missing';job.dispatchMatch=null;
   }
 }
 
@@ -68,7 +67,7 @@ async function imageData(file){
 }
 
 async function analyzeWithAI(file){
-  const response=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:await imageData(file),trailer:trailerSize()})});
+  const response=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:await imageData(file),trailer:0})});
   const result=await response.json().catch(()=>({error:`Analysis service returned ${response.status}`}));if(!response.ok)throw new Error(result.error||'AI analysis failed');return result;
 }
 
@@ -81,26 +80,27 @@ function parseText(text,file,index){
   const pallets=[];
   const rx=/\b(\d{1,2})\s+([FRD]\d{2})\s+(\d{1,3})\s+(\d{1,5})\s+(\d{1,4})\s+([0-9 -]{1,7})/gi;
   let m; while((m=rx.exec(clean))){pallets.push({pos:+m[1],code:m[2].toUpperCase(),cube:+m[3],weight:+m[4],qty:+m[5],stops:m[6].trim().replace(/\s+/g,'-'),specialCode:''});}
-  return{id:crypto.randomUUID(),fileName:file.name,route,date,oppk,door,trailer:trailerSize(),trailerSource:'manual',pallets,raw:text,status:'ready'};
+  return{id:crypto.randomUUID(),fileName:file.name,route,date,oppk,door,trailer:null,trailerSource:'missing',pallets,raw:text,status:'ready'};
 }
 
 async function addFiles(files){
   if(!files.length)return;
+  if(!state.dispatchLoaded){alert('Upload the nightly dispatch Excel file or dispatch photos before adding load maps.');return;}
   for(const file of files){
     const temp={id:crypto.randomUUID(),fileName:file.name,status:'reading',progress:0,preview:URL.createObjectURL(file)};
     state.jobs.push(temp);renderQueue();
     try{
       const result=await analyzeWithAI(file);
-      Object.assign(temp,{...result,id:temp.id,fileName:file.name,trailer:trailerSize(),preview:temp.preview,status:'ready'});
+      Object.assign(temp,{...result,id:temp.id,fileName:file.name,trailer:null,preview:temp.preview,status:'ready'});
     }catch(e){Object.assign(temp,parseText('',file,state.jobs.indexOf(temp)),{id:temp.id,preview:temp.preview,status:'review',error:e.message||'Automatic reading failed. Enter the values below.',barcodes:{dry:'',cooler:'',frozen:''}});}
     applyDispatchTrailer(temp);
     renderQueue();renderReviews();
   }
-  await preparePreview();
+  if(state.jobs.filter(j=>j.status!=='reading').every(j=>j.trailerSource==='dispatch'))await preparePreview();
 }
 
 function renderQueue(){
-  $('#queue').innerHTML=state.jobs.map(j=>{const regular=(j.pallets||[]).filter(p=>!SPECIAL_CODES.has(String(p.specialCode||''))).length,special=(j.pallets||[]).length-regular;return`<div class="queue-item"><img src="${j.preview||''}" alt=""><div><strong>${escapeHtml(j.fileName)}</strong><small>${j.status==='reading'?'OpenAI is reading the sheet…':`Ready to review · ${regular} pallets${special?` · ${special} hand stack`:''} · ${j.trailer||trailerSize()} ft`}</small>${j.trailerSource==='dispatch'?`<small class="match-ok">Dispatch match: ${escapeHtml(j.route)} → ${j.trailer} ft</small>`:''}${j.trailerSource==='missing'?'<small class="match-missing">Route not found in dispatch — check trailer size</small>':''}${j.error?`<small class="tag">${escapeHtml(j.error)}</small>`:''}${j.status==='reading'?'<div class="progress"><i style="width:65%"></i></div>':''}</div></div>`}).join('');
+  $('#queue').innerHTML=state.jobs.map(j=>{const regular=(j.pallets||[]).filter(p=>!SPECIAL_CODES.has(String(p.specialCode||''))).length,special=(j.pallets||[]).length-regular;return`<div class="queue-item"><img src="${j.preview||''}" alt=""><div><strong>${escapeHtml(j.fileName)}</strong><small>${j.status==='reading'?'OpenAI is reading the sheet…':`Ready to review · ${regular} pallets${special?` · ${special} hand stack`:''}${j.trailer?` · ${j.trailer} ft`:''}`}</small>${j.trailerSource==='dispatch'?`<small class="match-ok">Dispatch match: ${escapeHtml(j.route)} → ${j.trailer} ft</small>`:''}${j.trailerSource==='missing'?`<small class="match-missing">Route ${escapeHtml(j.route)} was not found in the dispatch — correct the Route # or add another dispatch photo</small>`:''}${j.error?`<small class="tag">${escapeHtml(j.error)}</small>`:''}${j.status==='reading'?'<div class="progress"><i style="width:65%"></i></div>':''}</div></div>`}).join('');
 }
 
 function palletLines(job){return job.pallets.map(p=>`${p.pos}, ${p.code}, ${p.weight}, ${p.qty}, ${p.stops}, ${p.specialCode||''}`).join('\n');}
@@ -112,7 +112,7 @@ function renderReviews(){
   $('#routeCount').textContent=`${ready.length} route${ready.length===1?'':'s'}`;
   $('#reviews').innerHTML=ready.map((j,i)=>{const regular=j.pallets.filter(p=>!SPECIAL_CODES.has(String(p.specialCode||''))).length,special=j.pallets.length-regular;return`<details class="route-review" open><summary class="route-summary"><span>${escapeHtml(j.route)}</span><span>${regular} pallets${special?` + ${special} hand stack`:''}</span></summary><div class="route-fields">
     <label>Route #<input data-id="${j.id}" data-key="route" value="${escapeHtml(j.route)}"></label><label>Door<input data-id="${j.id}" data-key="door" value="${escapeHtml(j.door)}"></label>
-    <label>Trailer size<select data-id="${j.id}" data-key="trailer">${[28,36,48,53].map(size=>`<option value="${size}" ${Number(j.trailer)===size?'selected':''}>${size} ft</option>`).join('')}</select><small class="trailer-source ${j.trailerSource==='dispatch'?'matched':j.trailerSource==='missing'?'missing':''}">${j.trailerSource==='dispatch'?`Matched from ${escapeHtml(j.dispatchMatch?.sheet||'dispatch')} · ${escapeHtml(j.dispatchMatch?.trailerNumber||'')}`:j.trailerSource==='missing'?'Not found in dispatch — manual selection required':'Manual fallback'}</small></label>
+    <label>Trailer size<div class="trailer-readout ${j.trailerSource==='dispatch'?'matched':'missing'}">${j.trailerSource==='dispatch'?`${j.trailer} ft`:'NO DISPATCH MATCH'}</div><small class="trailer-source ${j.trailerSource==='dispatch'?'matched':'missing'}">${j.trailerSource==='dispatch'?`Matched from ${escapeHtml(j.dispatchMatch?.sheet||'dispatch')} · ${escapeHtml(j.dispatchMatch?.trailerNumber||'')}`:'Correct the Route # or add another dispatch photo'}</small></label>
     <label>OPPK<input data-id="${j.id}" data-key="oppk" value="${escapeHtml(j.oppk)}"></label><label>Date<input data-id="${j.id}" data-key="date" value="${escapeHtml(j.date)}"></label>
     <label>Dry barcode<input data-id="${j.id}" data-key="barcode-dry" value="${escapeHtml(j.barcodes?.dry||'')}"></label><label>Cooler barcode<input data-id="${j.id}" data-key="barcode-cooler" value="${escapeHtml(j.barcodes?.cooler||'')}"></label>
     <label>Frozen barcode<input data-id="${j.id}" data-key="barcode-frozen" value="${escapeHtml(j.barcodes?.frozen||'')}"></label><span></span>
@@ -121,7 +121,7 @@ function renderReviews(){
   </div></details>`}).join('');
 }
 
-document.addEventListener('input',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id)return;const job=state.jobs.find(j=>j.id===id);if(key==='pallets')job.pallets=parseLines(e.target.value);else if(key.startsWith('barcode-')){job.barcodes=job.barcodes||{};job.barcodes[key.slice(8)]=e.target.value.trim();}else if(key==='trailer'){job.trailer=Number(e.target.value);job.trailerSource='manual';job.dispatchMatch=null;}else job[key]=e.target.value;});
+document.addEventListener('input',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id)return;const job=state.jobs.find(j=>j.id===id);if(key==='pallets')job.pallets=parseLines(e.target.value);else if(key.startsWith('barcode-')){job.barcodes=job.barcodes||{};job.barcodes[key.slice(8)]=e.target.value.trim();}else job[key]=e.target.value;});
 document.addEventListener('change',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id||key!=='route')return;const job=state.jobs.find(j=>j.id===id);applyDispatchTrailer(job);renderQueue();renderReviews();});
 $('#dispatchInput').addEventListener('change',e=>loadDispatch(e.target.files?.[0]));
 $('#dispatchCameraInput').addEventListener('change',async e=>{await loadDispatchPhotos([...e.target.files]);e.target.value='';});
@@ -153,6 +153,8 @@ let preparedPdf=null,preparedPdfUrl='';
 async function preparePreview(){
   const jobs=state.jobs.filter(j=>j.status!=='reading');
   if(!jobs.length){alert('Add and review at least one load map first.');return;}
+  const unmatched=jobs.filter(j=>j.trailerSource!=='dispatch'||![28,36,48,53].includes(Number(j.trailer)));
+  if(unmatched.length){alert(`PDF not created. No dispatch trailer match for: ${unmatched.map(j=>j.route||j.fileName).join(', ')}. Correct the Route # or add the missing dispatch photo.`);return;}
   $('#previewScreen').classList.remove('hidden');
   $('#previewPages').innerHTML='<div class="preview-loading">Preparing printable pages…</div>';
   $('#previewStatus').textContent='Preparing…';
