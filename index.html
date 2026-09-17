@@ -21,14 +21,25 @@
   <header class="app-header">
     <img src="assets/pfg-logo-white.png" alt="Performance Food Group">
     <div><h1>Load Map Generator</h1><p>Camera to printable loading map</p></div>
-    <span class="version-badge">VERSION 17</span>
+    <span class="version-badge">VERSION 18</span>
   </header>
 
   <main id="workspace">
     <section class="card setup-card">
       <div class="step">1</div>
       <div class="card-body">
-        <h2>Choose the trailer</h2>
+        <h2>Upload tonight's dispatch</h2>
+        <p class="hint">Upload the Excel dispatch once. The app matches each photographed route to the TRAILER column and uses its first two digits for the trailer size.</p>
+        <label class="primary-button file-button">Choose dispatch file<input id="dispatchInput" type="file" accept=".xlsx,.xls,.csv" hidden></label>
+        <div id="dispatchStatus" class="dispatch-status" aria-live="polite">No dispatch loaded yet.</div>
+      </div>
+    </section>
+
+    <section class="card setup-card">
+      <div class="step">2</div>
+      <div class="card-body">
+        <h2>Fallback trailer size</h2>
+        <p class="hint">Used only when the dispatch has not been uploaded or a route cannot be matched.</p>
         <div class="size-grid" role="radiogroup" aria-label="Trailer size">
           <label><input type="radio" name="trailer" value="28" checked><span>28 ft<small>12 / 13 pinwheeled</small></span></label>
           <label><input type="radio" name="trailer" value="36"><span>36 ft<small>16 / 17 pinwheeled</small></span></label>
@@ -39,7 +50,7 @@
     </section>
 
     <section class="card">
-      <div class="step">2</div>
+      <div class="step">3</div>
       <div class="card-body">
         <h2>Photograph the original maps</h2>
         <p class="hint">Lay each sheet flat, fill the frame, and avoid shadows. OpenAI reads the sheet; you confirm the results.</p>
@@ -52,7 +63,7 @@
     </section>
 
     <section id="reviewSection" class="card hidden">
-      <div class="step">3</div>
+      <div class="step">4</div>
       <div class="card-body">
         <div class="section-heading"><h2>Review the routes</h2><span id="routeCount"></span></div>
         <p class="hint">Correct anything the camera misread before printing.</p>

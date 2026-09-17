@@ -3,6 +3,7 @@
   "type": "module",
   "dependencies": {
     "bwip-js": "^4.7.0",
-    "pdfkit": "^0.17.2"
+    "pdfkit": "^0.17.2",
+    "xlsx": "^0.18.5"
   }
 }

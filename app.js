@@ -1,8 +1,36 @@
 const CAPACITY={28:{standard:12,pinwheel:13},36:{standard:16,pinwheel:17},48:{standard:22,pinwheel:23},53:{standard:24,pinwheel:26}};
-const state={jobs:[]};
+const state={jobs:[],dispatchRoutes:new Map(),dispatchLoaded:false,dispatchName:''};
 const $=s=>document.querySelector(s);
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const trailerSize=()=>Number(document.querySelector('input[name="trailer"]:checked').value);
+const routeKey=value=>String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+const readAsDataUrl=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('The dispatch file could not be opened.'));reader.readAsDataURL(file);});
+
+function applyDispatchTrailer(job){
+  const match=state.dispatchRoutes.get(routeKey(job.route));
+  if(match){
+    job.trailer=Number(match.trailer);job.trailerSource='dispatch';job.dispatchMatch=match;
+  }else{
+    job.trailer=Number(job.trailer)||trailerSize();job.trailerSource=state.dispatchLoaded?'missing':'manual';job.dispatchMatch=null;
+  }
+}
+
+async function loadDispatch(file){
+  if(!file)return;
+  const status=$('#dispatchStatus');status.className='dispatch-status loading';status.textContent=`Reading ${file.name}…`;
+  try{
+    const dataUrl=await readAsDataUrl(file),base64=String(dataUrl).split(',')[1]||'';
+    const response=await fetch('/api/dispatch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file:base64,name:file.name})});
+    const result=await response.json().catch(()=>({error:`Dispatch service returned ${response.status}`}));
+    if(!response.ok)throw new Error(result.error||'Dispatch could not be read.');
+    state.dispatchRoutes=new Map((result.routes||[]).map(row=>[routeKey(row.route),row]));state.dispatchLoaded=true;state.dispatchName=file.name;
+    state.jobs.filter(job=>job.status!=='reading').forEach(applyDispatchTrailer);
+    status.className='dispatch-status ready';status.innerHTML=`<strong>${escapeHtml(file.name)}</strong><span>${result.count} routes ready · ${result.sheets} day sheets read</span>${result.warnings?.length?`<small>${escapeHtml(result.warnings.join(' · '))}</small>`:''}`;
+    renderQueue();renderReviews();
+  }catch(error){
+    state.dispatchRoutes=new Map();state.dispatchLoaded=false;state.dispatchName='';status.className='dispatch-status error';status.textContent=error.message||'Dispatch could not be read.';
+  }
+}
 async function imageData(file){
   const url=URL.createObjectURL(file),image=new Image();
   try{
@@ -28,7 +56,7 @@ function parseText(text,file,index){
   const pallets=[];
   const rx=/\b(\d{1,2})\s+([FRD]\d{2})\s+(\d{1,3})\s+(\d{1,5})\s+(\d{1,4})\s+([0-9 -]{1,7})/gi;
   let m; while((m=rx.exec(clean))){pallets.push({pos:+m[1],code:m[2].toUpperCase(),cube:+m[3],weight:+m[4],qty:+m[5],stops:m[6].trim().replace(/\s+/g,'-')});}
-  return{id:crypto.randomUUID(),fileName:file.name,route,date,oppk,door,trailer:trailerSize(),pallets,raw:text,status:'ready'};
+  return{id:crypto.randomUUID(),fileName:file.name,route,date,oppk,door,trailer:trailerSize(),trailerSource:'manual',pallets,raw:text,status:'ready'};
 }
 
 async function addFiles(files){
@@ -40,13 +68,14 @@ async function addFiles(files){
       const result=await analyzeWithAI(file);
       Object.assign(temp,{...result,id:temp.id,fileName:file.name,trailer:trailerSize(),preview:temp.preview,status:'ready'});
     }catch(e){Object.assign(temp,parseText('',file,state.jobs.indexOf(temp)),{id:temp.id,preview:temp.preview,status:'review',error:e.message||'Automatic reading failed. Enter the values below.',barcodes:{dry:'',cooler:'',frozen:''}});}
+    applyDispatchTrailer(temp);
     renderQueue();renderReviews();
   }
   await preparePreview();
 }
 
 function renderQueue(){
-  $('#queue').innerHTML=state.jobs.map(j=>`<div class="queue-item"><img src="${j.preview||''}" alt=""><div><strong>${escapeHtml(j.fileName)}</strong><small>${j.status==='reading'?'OpenAI is reading the sheet…':`Ready to review · ${j.pallets?.length||0} pallets found`}</small>${j.error?`<small class="tag">${escapeHtml(j.error)}</small>`:''}${j.status==='reading'?'<div class="progress"><i style="width:65%"></i></div>':''}</div></div>`).join('');
+  $('#queue').innerHTML=state.jobs.map(j=>`<div class="queue-item"><img src="${j.preview||''}" alt=""><div><strong>${escapeHtml(j.fileName)}</strong><small>${j.status==='reading'?'OpenAI is reading the sheet…':`Ready to review · ${j.pallets?.length||0} pallets · ${j.trailer||trailerSize()} ft`}</small>${j.trailerSource==='dispatch'?`<small class="match-ok">Dispatch match: ${escapeHtml(j.route)} → ${j.trailer} ft</small>`:''}${j.trailerSource==='missing'?'<small class="match-missing">Route not found in dispatch — check trailer size</small>':''}${j.error?`<small class="tag">${escapeHtml(j.error)}</small>`:''}${j.status==='reading'?'<div class="progress"><i style="width:65%"></i></div>':''}</div></div>`).join('');
 }
 
 function palletLines(job){return job.pallets.map(p=>`${p.pos}, ${p.code}, ${p.weight}, ${p.qty}, ${p.stops}`).join('\n');}
@@ -58,6 +87,7 @@ function renderReviews(){
   $('#routeCount').textContent=`${ready.length} route${ready.length===1?'':'s'}`;
   $('#reviews').innerHTML=ready.map((j,i)=>`<details class="route-review" open><summary class="route-summary"><span>${escapeHtml(j.route)}</span><span>${j.pallets.length} pallets</span></summary><div class="route-fields">
     <label>Route #<input data-id="${j.id}" data-key="route" value="${escapeHtml(j.route)}"></label><label>Door<input data-id="${j.id}" data-key="door" value="${escapeHtml(j.door)}"></label>
+    <label>Trailer size<select data-id="${j.id}" data-key="trailer">${[28,36,48,53].map(size=>`<option value="${size}" ${Number(j.trailer)===size?'selected':''}>${size} ft</option>`).join('')}</select><small class="trailer-source ${j.trailerSource==='dispatch'?'matched':j.trailerSource==='missing'?'missing':''}">${j.trailerSource==='dispatch'?`Matched from ${escapeHtml(j.dispatchMatch?.sheet||'dispatch')} · ${escapeHtml(j.dispatchMatch?.trailerNumber||'')}`:j.trailerSource==='missing'?'Not found in dispatch — manual selection required':'Manual fallback'}</small></label>
     <label>OPPK<input data-id="${j.id}" data-key="oppk" value="${escapeHtml(j.oppk)}"></label><label>Date<input data-id="${j.id}" data-key="date" value="${escapeHtml(j.date)}"></label>
     <label>Dry barcode<input data-id="${j.id}" data-key="barcode-dry" value="${escapeHtml(j.barcodes?.dry||'')}"></label><label>Cooler barcode<input data-id="${j.id}" data-key="barcode-cooler" value="${escapeHtml(j.barcodes?.cooler||'')}"></label>
     <label>Frozen barcode<input data-id="${j.id}" data-key="barcode-frozen" value="${escapeHtml(j.barcodes?.frozen||'')}"></label><span></span>
@@ -66,7 +96,9 @@ function renderReviews(){
   </div></details>`).join('');
 }
 
-document.addEventListener('input',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id)return;const job=state.jobs.find(j=>j.id===id);if(key==='pallets')job.pallets=parseLines(e.target.value);else if(key.startsWith('barcode-')){job.barcodes=job.barcodes||{};job.barcodes[key.slice(8)]=e.target.value.trim();}else job[key]=e.target.value;});
+document.addEventListener('input',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id)return;const job=state.jobs.find(j=>j.id===id);if(key==='pallets')job.pallets=parseLines(e.target.value);else if(key.startsWith('barcode-')){job.barcodes=job.barcodes||{};job.barcodes[key.slice(8)]=e.target.value.trim();}else if(key==='trailer'){job.trailer=Number(e.target.value);job.trailerSource='manual';job.dispatchMatch=null;}else job[key]=e.target.value;});
+document.addEventListener('change',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id||key!=='route')return;const job=state.jobs.find(j=>j.id===id);applyDispatchTrailer(job);renderQueue();renderReviews();});
+$('#dispatchInput').addEventListener('change',e=>loadDispatch(e.target.files?.[0]));
 $('#cameraInput').addEventListener('change',e=>addFiles([...e.target.files]));$('#batchInput').addEventListener('change',e=>addFiles([...e.target.files]));
 $('#clearButton').addEventListener('click',()=>{state.jobs.forEach(j=>j.preview&&URL.revokeObjectURL(j.preview));state.jobs=[];renderQueue();renderReviews();$('#printArea').innerHTML='';});
 
