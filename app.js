@@ -1,5 +1,6 @@
 const CAPACITY={28:{standard:12,pinwheel:13},36:{standard:16,pinwheel:17},48:{standard:22,pinwheel:23},53:{standard:24,pinwheel:26}};
 const SPECIAL_CODES=new Set(['40','42','53','71','81']);
+const usesPalletSpace=p=>!SPECIAL_CODES.has(String(p?.specialCode||''))||Number(p?.weight)>200;
 const state={jobs:[],dispatchRoutes:new Map(),dispatchLoaded:false,dispatchName:'',dispatchPhotoCount:0};
 const $=s=>document.querySelector(s);
 const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -100,7 +101,7 @@ async function addFiles(files){
 }
 
 function renderQueue(){
-  $('#queue').innerHTML=state.jobs.map(j=>{const regular=(j.pallets||[]).filter(p=>!SPECIAL_CODES.has(String(p.specialCode||''))).length,special=(j.pallets||[]).length-regular;return`<div class="queue-item"><img src="${j.preview||''}" alt=""><div><strong>${escapeHtml(j.fileName)}</strong><small>${j.status==='reading'?'OpenAI is reading the sheet…':`Ready to review · ${regular} pallets${special?` · ${special} hand stack`:''}${j.trailer?` · ${j.trailer} ft`:''}`}</small>${j.trailerSource==='dispatch'?`<small class="match-ok">Dispatch match: ${escapeHtml(j.route)} → ${j.trailer} ft</small>`:''}${j.trailerSource==='missing'?`<small class="match-missing">Route ${escapeHtml(j.route)} was not found in the dispatch — correct the Route # or add another dispatch photo</small>`:''}${j.error?`<small class="tag">${escapeHtml(j.error)}</small>`:''}${j.status==='reading'?'<div class="progress"><i style="width:65%"></i></div>':''}</div></div>`}).join('');
+  $('#queue').innerHTML=state.jobs.map(j=>{const palletSpaces=(j.pallets||[]).filter(usesPalletSpace).length,special=(j.pallets||[]).filter(p=>SPECIAL_CODES.has(String(p.specialCode||''))).length;return`<div class="queue-item"><img src="${j.preview||''}" alt=""><div><strong>${escapeHtml(j.fileName)}</strong><small>${j.status==='reading'?'OpenAI is reading the sheet…':`Ready to review · ${palletSpaces} pallet spaces${special?` · ${special} special items`:''}${j.trailer?` · ${j.trailer} ft`:''}`}</small>${j.trailerSource==='dispatch'?`<small class="match-ok">Dispatch match: ${escapeHtml(j.route)} → ${j.trailer} ft</small>`:''}${j.trailerSource==='missing'?`<small class="match-missing">Route ${escapeHtml(j.route)} was not found in the dispatch — correct the Route # or add another dispatch photo</small>`:''}${j.error?`<small class="tag">${escapeHtml(j.error)}</small>`:''}${j.status==='reading'?'<div class="progress"><i style="width:65%"></i></div>':''}</div></div>`}).join('');
 }
 
 function palletLines(job){return job.pallets.map(p=>`${p.pos}, ${p.code}, ${p.weight}, ${p.qty}, ${p.stops}, ${p.specialCode||''}`).join('\n');}
@@ -110,7 +111,7 @@ function renderReviews(){
   const ready=state.jobs.filter(j=>j.status!=='reading');
   $('#reviewSection').classList.toggle('hidden',!ready.length);$('#finishSection').classList.toggle('hidden',!ready.length);
   $('#routeCount').textContent=`${ready.length} route${ready.length===1?'':'s'}`;
-  $('#reviews').innerHTML=ready.map((j,i)=>{const regular=j.pallets.filter(p=>!SPECIAL_CODES.has(String(p.specialCode||''))).length,special=j.pallets.length-regular;return`<details class="route-review" open><summary class="route-summary"><span>${escapeHtml(j.route)}</span><span>${regular} pallets${special?` + ${special} hand stack`:''}</span></summary><div class="route-fields">
+  $('#reviews').innerHTML=ready.map((j,i)=>{const palletSpaces=j.pallets.filter(usesPalletSpace).length,special=j.pallets.filter(p=>SPECIAL_CODES.has(String(p.specialCode||''))).length;return`<details class="route-review" open><summary class="route-summary"><span>${escapeHtml(j.route)}</span><span>${palletSpaces} pallet spaces${special?` + ${special} special`:''}</span></summary><div class="route-fields">
     <label>Route #<input data-id="${j.id}" data-key="route" value="${escapeHtml(j.route)}"></label><label>Door<input data-id="${j.id}" data-key="door" value="${escapeHtml(j.door)}"></label>
     <label>Trailer size<div class="trailer-readout ${j.trailerSource==='dispatch'?'matched':'missing'}">${j.trailerSource==='dispatch'?`${j.trailer} ft`:'NO DISPATCH MATCH'}</div><small class="trailer-source ${j.trailerSource==='dispatch'?'matched':'missing'}">${j.trailerSource==='dispatch'?`Matched from ${escapeHtml(j.dispatchMatch?.sheet||'dispatch')} · ${escapeHtml(j.dispatchMatch?.trailerNumber||'')}`:'Correct the Route # or add another dispatch photo'}</small></label>
     <label>OPPK<input data-id="${j.id}" data-key="oppk" value="${escapeHtml(j.oppk)}"></label><label>Date<input data-id="${j.id}" data-key="date" value="${escapeHtml(j.date)}"></label>
@@ -165,7 +166,7 @@ async function preparePreview(){
     if(!response.ok){const problem=await response.json().catch(()=>({}));throw new Error(problem.error||`PDF service returned ${response.status}`);}
     preparedPdf=await response.blob();if(preparedPdfUrl)URL.revokeObjectURL(preparedPdfUrl);preparedPdfUrl=URL.createObjectURL(preparedPdf);
     $('#previewPages').innerHTML=`<iframe class="pdf-preview-frame" title="Generated load map PDF" src="${preparedPdfUrl}"></iframe>`;
-    $('#previewStatus').textContent=`${jobs.length*2} pages ready`;$('#sharePdf').disabled=false;$('#sharePdf').textContent='Share PDF';$('#printPdf').disabled=false;$('#printPdf').textContent='Open / Print PDF';
+    const pageCount=jobs.reduce((total,job)=>total+1+Math.max(1,Math.ceil((job.pallets?.length||0)/18)),0);$('#previewStatus').textContent=`${pageCount} pages ready`;$('#sharePdf').disabled=false;$('#sharePdf').textContent='Share PDF';$('#printPdf').disabled=false;$('#printPdf').textContent='Open / Print PDF';
   }catch(error){
     console.error(error);$('#previewStatus').textContent='PDF failed';$('#previewPages').innerHTML=`<div class="preview-loading">${escapeHtml(error.message||'The PDF could not be generated.')}</div>`;$('#sharePdf').textContent='Share unavailable';
   }
