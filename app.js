@@ -104,26 +104,42 @@ function renderQueue(){
   $('#queue').innerHTML=state.jobs.map(j=>{const palletSpaces=(j.pallets||[]).filter(usesPalletSpace).length,special=(j.pallets||[]).filter(p=>SPECIAL_CODES.has(String(p.specialCode||''))).length;return`<div class="queue-item"><img src="${j.preview||''}" alt=""><div><strong>${escapeHtml(j.fileName)}</strong><small>${j.status==='reading'?'OpenAI is reading the sheet…':`Ready to review · ${palletSpaces} pallet spaces${special?` · ${special} special items`:''}${j.trailer?` · ${j.trailer} ft`:''}`}</small>${j.trailerSource==='dispatch'?`<small class="match-ok">Dispatch match: ${escapeHtml(j.route)} → ${j.trailer} ft</small>`:''}${j.trailerSource==='missing'?`<small class="match-missing">Route ${escapeHtml(j.route)} was not found in the dispatch — correct the Route # or add another dispatch photo</small>`:''}${j.error?`<small class="tag">${escapeHtml(j.error)}</small>`:''}${j.status==='reading'?'<div class="progress"><i style="width:65%"></i></div>':''}</div></div>`}).join('');
 }
 
-function palletLines(job){return job.pallets.map(p=>`${p.pos}, ${p.code}, ${p.weight}, ${p.qty}, ${p.stops}, ${p.specialCode||''}`).join('\n');}
-function parseLines(value){return value.split('\n').map(line=>line.trim()).filter(Boolean).map(line=>{const a=line.split(',').map(x=>x.trim()),specialCode=SPECIAL_CODES.has(a[5])?a[5]:'';return{pos:+a[0],code:(a[1]||'').toUpperCase(),weight:+a[2]||0,qty:+a[3]||0,stops:a[4]||'',specialCode};}).filter(p=>p.pos&&/^[FRD]\d{2}$/.test(p.code));}
+const PALLET_NUMERIC_FIELDS=new Set(['pos','cube','weight','qty']);
+function palletEditor(job){
+  const rows=(job.pallets||[]).map((p,row)=>`<div class="pallet-row">
+    <div class="pallet-row-number">PALLET ${row+1}</div>
+    <label>Position<input inputmode="numeric" data-id="${job.id}" data-row="${row}" data-pallet-key="pos" value="${escapeHtml(p.pos)}" aria-label="Pallet ${row+1} position"></label>
+    <label>Pallet code<input autocapitalize="characters" data-id="${job.id}" data-row="${row}" data-pallet-key="code" value="${escapeHtml(p.code)}" placeholder="D01" aria-label="Pallet ${row+1} code"></label>
+    <label>Cube<input inputmode="numeric" data-id="${job.id}" data-row="${row}" data-pallet-key="cube" value="${escapeHtml(p.cube)}" aria-label="Pallet ${row+1} cube"></label>
+    <label>Weight (lb)<input inputmode="numeric" data-id="${job.id}" data-row="${row}" data-pallet-key="weight" value="${escapeHtml(p.weight)}" aria-label="Pallet ${row+1} weight"></label>
+    <label>Quantity<input inputmode="numeric" data-id="${job.id}" data-row="${row}" data-pallet-key="qty" value="${escapeHtml(p.qty)}" aria-label="Pallet ${row+1} quantity"></label>
+    <label>Stops<input data-id="${job.id}" data-row="${row}" data-pallet-key="stops" value="${escapeHtml(p.stops)}" placeholder="1-5" aria-label="Pallet ${row+1} stops"></label>
+    <label>Special item<select data-id="${job.id}" data-row="${row}" data-pallet-key="specialCode" aria-label="Pallet ${row+1} special item">
+      <option value="" ${!p.specialCode?'selected':''}>None</option><option value="40" ${String(p.specialCode)==='40'?'selected':''}>40 · Dry PIR</option><option value="42" ${String(p.specialCode)==='42'?'selected':''}>42 · Chemicals</option><option value="53" ${String(p.specialCode)==='53'?'selected':''}>53 · Ice Cream</option><option value="71" ${String(p.specialCode)==='71'?'selected':''}>71 · Freezer PIR</option><option value="81" ${String(p.specialCode)==='81'?'selected':''}>81 · Seafood</option>
+    </select></label>
+    <button type="button" class="remove-pallet" data-action="remove-pallet" data-id="${job.id}" data-row="${row}" aria-label="Remove pallet ${row+1}">Remove</button>
+  </div>`).join('');
+  return`<div class="full pallet-editor"><div class="pallet-editor-heading"><div><strong>PALLET DETAILS</strong><small>Edit anything the camera read incorrectly.</small></div><button type="button" class="add-pallet" data-action="add-pallet" data-id="${job.id}">+ Add pallet</button></div><div class="pallet-list">${rows||'<div class="empty-pallets">No pallets were identified. Tap “Add pallet” to enter them manually.</div>'}</div></div>`;
+}
 
 function renderReviews(){
   const ready=state.jobs.filter(j=>j.status!=='reading');
   $('#reviewSection').classList.toggle('hidden',!ready.length);$('#finishSection').classList.toggle('hidden',!ready.length);
   $('#routeCount').textContent=`${ready.length} route${ready.length===1?'':'s'}`;
-  $('#reviews').innerHTML=ready.map((j,i)=>{const palletSpaces=j.pallets.filter(usesPalletSpace).length,special=j.pallets.filter(p=>SPECIAL_CODES.has(String(p.specialCode||''))).length;return`<details class="route-review" open><summary class="route-summary"><span>${escapeHtml(j.route)}</span><span>${palletSpaces} pallet spaces${special?` + ${special} special`:''}</span></summary><div class="route-fields">
+  $('#reviews').innerHTML=ready.map(j=>{j.pallets=j.pallets||[];const palletSpaces=j.pallets.filter(usesPalletSpace).length,special=j.pallets.filter(p=>SPECIAL_CODES.has(String(p.specialCode||''))).length;return`<details class="route-review" open><summary class="route-summary"><span>${escapeHtml(j.route)}</span><span>${palletSpaces} pallet spaces${special?` + ${special} special`:''}</span></summary><div class="route-fields">
     <label>Route #<input data-id="${j.id}" data-key="route" value="${escapeHtml(j.route)}"></label><label>Door<input data-id="${j.id}" data-key="door" value="${escapeHtml(j.door)}"></label>
     <label>Trailer size<div class="trailer-readout ${j.trailerSource==='dispatch'?'matched':'missing'}">${j.trailerSource==='dispatch'?`${j.trailer} ft`:'NO DISPATCH MATCH'}</div><small class="trailer-source ${j.trailerSource==='dispatch'?'matched':'missing'}">${j.trailerSource==='dispatch'?`Matched from ${escapeHtml(j.dispatchMatch?.sheet||'dispatch')} · ${escapeHtml(j.dispatchMatch?.trailerNumber||'')}`:'Correct the Route # or add another dispatch photo'}</small></label>
     <label>OPPK<input data-id="${j.id}" data-key="oppk" value="${escapeHtml(j.oppk)}"></label><label>Date<input data-id="${j.id}" data-key="date" value="${escapeHtml(j.date)}"></label>
     <label>Dry barcode<input data-id="${j.id}" data-key="barcode-dry" value="${escapeHtml(j.barcodes?.dry||'')}"></label><label>Cooler barcode<input data-id="${j.id}" data-key="barcode-cooler" value="${escapeHtml(j.barcodes?.cooler||'')}"></label>
     <label>Frozen barcode<input data-id="${j.id}" data-key="barcode-frozen" value="${escapeHtml(j.barcodes?.frozen||'')}"></label><span></span>
     ${j.review_notes?.length?`<div class="full tag"><b>AI REVIEW:</b> ${escapeHtml(j.review_notes.join(' · '))}</div>`:''}
-    <label class="full">Rows — position, pallet code, weight, quantity, stops, hand-stack code<textarea data-id="${j.id}" data-key="pallets">${escapeHtml(palletLines(j))}</textarea><small class="field-help">Hand-stack codes: 40 Dry PIR · 42 Chemicals · 53 Ice Cream · 71 Freezer PIR · 81 Seafood</small></label>
+    ${palletEditor(j)}
   </div></details>`}).join('');
 }
 
-document.addEventListener('input',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id)return;const job=state.jobs.find(j=>j.id===id);if(key==='pallets')job.pallets=parseLines(e.target.value);else if(key.startsWith('barcode-')){job.barcodes=job.barcodes||{};job.barcodes[key.slice(8)]=e.target.value.trim();}else job[key]=e.target.value;});
+document.addEventListener('input',e=>{const id=e.target.dataset.id;if(!id)return;const job=state.jobs.find(j=>j.id===id);if(!job)return;const palletKey=e.target.dataset.palletKey;if(palletKey){const pallet=job.pallets?.[Number(e.target.dataset.row)];if(!pallet)return;let value=e.target.value;if(PALLET_NUMERIC_FIELDS.has(palletKey))value=value===''?'':Number(value);if(palletKey==='code')value=value.toUpperCase().replace(/\s/g,'');pallet[palletKey]=value;return;}const key=e.target.dataset.key;if(key?.startsWith('barcode-')){job.barcodes=job.barcodes||{};job.barcodes[key.slice(8)]=e.target.value.trim();}else if(key)job[key]=e.target.value;});
 document.addEventListener('change',e=>{const id=e.target.dataset.id,key=e.target.dataset.key;if(!id||key!=='route')return;const job=state.jobs.find(j=>j.id===id);applyDispatchTrailer(job);renderQueue();renderReviews();});
+document.addEventListener('click',e=>{const button=e.target.closest('[data-action]');if(!button)return;const job=state.jobs.find(j=>j.id===button.dataset.id);if(!job)return;if(button.dataset.action==='add-pallet'){job.pallets=job.pallets||[];job.pallets.push({pos:'',code:'',cube:'',weight:'',qty:'',stops:'',specialCode:''});}else if(button.dataset.action==='remove-pallet'){job.pallets.splice(Number(button.dataset.row),1);}renderQueue();renderReviews();});
 $('#dispatchInput').addEventListener('change',e=>loadDispatch(e.target.files?.[0]));
 $('#dispatchCameraInput').addEventListener('change',async e=>{await loadDispatchPhotos([...e.target.files]);e.target.value='';});
 $('#dispatchPhotosInput').addEventListener('change',async e=>{await loadDispatchPhotos([...e.target.files]);e.target.value='';});
@@ -151,11 +167,35 @@ mapPage=job=>{
 };
 function labelPage(job){const labels=[...job.pallets,...Array(Math.max(0,28-job.pallets.length)).fill(null)].slice(0,28);return`<section class="print-sheet"><div class="print-header"><img src="assets/pfg-logo-white.png"><h1>PALLET LABEL RECORD</h1><div class="meta">ROUTE ${escapeHtml(job.route)}<br>${escapeHtml(job.date)}</div></div><p style="font-size:8pt;color:#e31b23;font-weight:800">PRINT AT ACTUAL SIZE (100%) — EACH SPACE IS 2 × 1 INCH</p><div class="label-grid">${labels.map((p,i)=>`<div class="label-space"><strong>${p?`${p.code} | SOURCE POSITION ${p.pos}`:`EXTRA LABEL SPACE ${i+1}`}</strong><span>APPLY 2 × 1 LABEL HERE</span></div>`).join('')}</div><div class="label-footer"><span class="check"></span> ALL ${job.pallets.length} LABELS ATTACHED &nbsp;&nbsp; Loader: __________________ &nbsp;&nbsp; Time: __________</div></section>`}
 let preparedPdf=null,preparedPdfUrl='';
+function jobReviewErrors(job){
+  const errors=[];
+  const positions=new Set();
+  if(!String(job.route||'').trim())errors.push('Route #');
+  if(!String(job.door||'').trim())errors.push('Door');
+  if(!String(job.oppk||'').trim())errors.push('OPPK');
+  if(!String(job.date||'').trim())errors.push('Date');
+  (job.pallets||[]).forEach((p,index)=>{
+    const missing=[];
+    if(!Number.isInteger(Number(p.pos))||Number(p.pos)<1)missing.push('position');
+    else if(positions.has(Number(p.pos)))missing.push('duplicate position');
+    else positions.add(Number(p.pos));
+    if(!/^[FRD]\d{2}$/i.test(String(p.code||'')))missing.push('pallet code');
+    if(!Number.isFinite(Number(p.cube))||Number(p.cube)<0)missing.push('cube');
+    if(!Number.isFinite(Number(p.weight))||Number(p.weight)<=0)missing.push('weight');
+    if(!Number.isFinite(Number(p.qty))||Number(p.qty)<=0)missing.push('quantity');
+    if(!String(p.stops||'').trim())missing.push('stops');
+    if(missing.length)errors.push(`Pallet ${index+1}: ${missing.join(', ')}`);
+  });
+  if(!(job.pallets||[]).length)errors.push('at least one pallet');
+  return errors;
+}
 async function preparePreview(){
   const jobs=state.jobs.filter(j=>j.status!=='reading');
   if(!jobs.length){alert('Add and review at least one load map first.');return;}
   const unmatched=jobs.filter(j=>j.trailerSource!=='dispatch'||![28,36,48,53].includes(Number(j.trailer)));
   if(unmatched.length){alert(`PDF not created. No dispatch trailer match for: ${unmatched.map(j=>j.route||j.fileName).join(', ')}. Correct the Route # or add the missing dispatch photo.`);return;}
+  const incomplete=jobs.map(job=>({job,errors:jobReviewErrors(job)})).filter(item=>item.errors.length);
+  if(incomplete.length){alert(`Please correct the listed review information before creating the PDF:\n\n${incomplete.map(({job,errors})=>`${job.route||job.fileName}: ${errors.slice(0,6).join('; ')}${errors.length>6?`; and ${errors.length-6} more`:''}`).join('\n')}`);return;}
   $('#previewScreen').classList.remove('hidden');
   $('#previewPages').innerHTML='<div class="preview-loading">Preparing printable pages…</div>';
   $('#previewStatus').textContent='Preparing…';
